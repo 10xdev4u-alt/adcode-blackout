@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.4 - 2026-10-23
 
 - `npm run soak -- --segment-bytes 8000` forces journal rotation every few
   entries; 30 seconds at 25 req/s produced 19 segments and a chain that still
