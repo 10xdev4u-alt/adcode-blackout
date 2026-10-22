@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 - 2026-10-23
 
 - `blackout compat` no longer requires a rewritten `/v1/config` for a pass. A
   stock build sends `dev-token` when `ADCODE_AD_SERVER` is set, production
