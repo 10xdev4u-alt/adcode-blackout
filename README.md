@@ -139,6 +139,10 @@ cannot hit it with a form post.
 - AppImage renamed by an update: the next launch resolves the newest match.
   Set `ADCODE_APPIMAGE` to pin one deliberately.
 
+Uninstalling keeps the journal and the config, because they are the record of
+what happened. `blackout uninstall --purge` removes them too; it refuses to
+follow a symlink and deletes only files it recognises.
+
 ## Development
 
 No dependencies, no build step.

@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -145,6 +145,27 @@ test("install, launch, pause, report, verify, uninstall", async () => {
   const removed = run(home, ["uninstall"]);
   assert.equal(removed.status, 0, removed.stderr);
   assert.equal(existsSync(join(home, ".local", "bin", "adcode")), false);
+  assert.ok(existsSync(join(home, ".local", "state", "blackout", "journal.jsonl")), "uninstall keeps the journal");
+  assert.ok(existsSync(join(home, ".config", "blackout", "config.json")), "uninstall keeps the config");
+
+  const purged = run(home, ["uninstall", "--purge"]);
+  assert.equal(purged.status, 0, purged.stderr);
+  assert.equal(existsSync(join(home, ".local", "state", "blackout", "journal.jsonl")), false);
+  assert.equal(existsSync(join(home, ".config", "blackout", "config.json")), false);
+});
+
+test("purge refuses to follow a symlink out of the state directory", async () => {
+  const { home } = await setup(18800);
+  const target = join(home, "outside.txt");
+  writeFileSync(target, "keep me");
+  mkdirSync(join(home, ".local", "state", "blackout"), { recursive: true });
+  symlinkSync(target, join(home, ".local", "state", "blackout", "journal.jsonl"));
+
+  const result = run(home, ["uninstall", "--purge"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /refusing to delete the symlink/);
+  assert.equal(readFileSync(target, "utf8"), "keep me");
+  assert.ok(existsSync(join(home, ".config", "blackout", "config.json")), "nothing was deleted");
 });
 
 test("doctor names the process holding the proxy port", { skip: process.platform !== "linux" }, async () => {
