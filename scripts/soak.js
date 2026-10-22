@@ -34,6 +34,10 @@ function option(name, fallback) {
 
 const seconds = option("seconds", 60);
 const rate = option("rate", 25);
+// Small enough to force rotations, large enough to keep the segment count sane.
+const segmentBytes = option("segment-bytes", 5 * 1024 * 1024);
+
+if (segmentBytes < 1024) throw new TypeError("--segment-bytes must be at least 1024");
 const json = process.argv.includes("--json");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -58,7 +62,7 @@ await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
 const upstreamOrigin = `http://127.0.0.1:${upstream.address().port}`;
 
 const dir = await mkdtemp(join(tmpdir(), "blackout-soak-"));
-const journal = createJournal(join(dir, "journal.jsonl"));
+const journal = createJournal(join(dir, "journal.jsonl"), { maxBytes: segmentBytes });
 const proxy = createProxy({
   policy: parsePolicy({ port: 0, upstream: upstreamOrigin, dashboard: false }),
   journal,
@@ -177,7 +181,7 @@ if (achievedRate < rate * 0.8) problems.push(`only ${achievedRate.toFixed(1)} of
 const summary = {
   seconds: elapsed,
   requests: sent,
-  decisions: { blocked, acked, rewritten, entries: journal.entries.length, onDisk: onDisk.length },
+  decisions: { blocked, acked, rewritten, entries: journal.entries.length, onDisk: onDisk.length, segments: journal.segments.length },
   rssMiB: { start: Number((before.rss / 1024 / 1024).toFixed(1)), peak: Number((peakRss / 1024 / 1024).toFixed(1)), growth: Number((rssGrowth / 1024 / 1024).toFixed(1)) },
   heapMiB: { start: Number((before.heapUsed / 1024 / 1024).toFixed(1)), end: Number((after.heapUsed / 1024 / 1024).toFixed(1)), secondHalf: Number((secondHalfHeapGrowth / 1024 / 1024).toFixed(1)) },
   missed,
@@ -193,7 +197,7 @@ if (json) {
 } else {
   console.log(`soak ${summary.seconds.toFixed(1)}s at ${rate}/s`);
   console.log(`requests   ${sent.serve} serve, ${sent.receipts} receipts, ${sent.config} config, ${sent.chat} chat`);
-  console.log(`decisions  ${blocked} blocked, ${acked} acked, ${rewritten} rewritten (${journal.entries.length} in memory, ${onDisk.length} on disk)`);
+  console.log(`decisions  ${blocked} blocked, ${acked} acked, ${rewritten} rewritten (${journal.entries.length} in memory, ${onDisk.length} on disk, ${journal.segments.length} segment(s))`);
   // RSS is reported, not judged: V8 reserves heap and does not hand it back, so
   // a growing RSS during warm-up is normal. A real leak shows up as heap that
   // keeps climbing in the second half, and that is what fails the run.
