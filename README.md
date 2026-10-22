@@ -170,7 +170,7 @@ follow a symlink and deletes only files it recognises.
 No dependencies, no build step.
 
 ```sh
-npm test                 # 83 tests, node:test
+npm test                 # 101 tests, node:test
 node bin/blackout.js help
 node scripts/smoke.js    # proxy + contract calls + a report, no app needed
 ```
