@@ -150,6 +150,10 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       version: VERSION,
       now: now(),
       enabled,
+      // Totals come from the journal's own counters: `journal.entries` is a
+      // bounded tail, so counting it would shrink as the proxy got busier.
+      summary: typeof journal.summary === "function" ? journal.summary() : null,
+      integrity: journal.integrity,
       // A journal that cannot be written is not a reason to stop blocking, but it
       // is a reason to stop claiming the record is complete.
       journalWriteError: journal.writeError ?? null,

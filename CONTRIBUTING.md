@@ -40,6 +40,11 @@ from what was sent, a descriptor count that does not settle after the run, or a
 heap that keeps growing in the second half. RSS is printed but not judged: V8
 reserves heap and does not give it back, so warm-up growth is not a leak.
 
+The heap figure to watch is *reserved*, not used: V8 grows the reservation while
+the load ramps and then plateaus, while `heapUsed` shows the GC sawtooth either
+way. A reservation that keeps climbing over a long run is the shape of a leak.
+`--json` includes the per-second samples so the shape is visible.
+
 Add `--segment-bytes 8000` to force rotation every few entries and verify the
 chain across dozens of segments under the same load.
 

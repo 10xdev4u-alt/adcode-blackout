@@ -4,6 +4,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createJournal, GENESIS, readJournal, readJournalChain, summarize, verifyChain } from "../src/journal.js";
+import { buildReport } from "../src/report.js";
 
 const dirs = [];
 
@@ -145,6 +146,55 @@ test("a journal that cannot be written keeps the decision and reports the failur
   journal.append("serve-blocked", { path: "/v1/serve" });
   assert.equal(journal.entries.length, 2);
   assert.equal(journal.writeError, firstFailure);
+});
+
+test("a long journal keeps exact totals while retaining only a tail", () => {
+  const journal = createJournal(null, { retainEntries: 4 });
+  const payload = "x".repeat(500);
+  for (let index = 0; index < 40; index++) {
+    journal.append(index % 2 === 0 ? "serve-blocked" : "receipt-blocked", { index, payload, count: 2 });
+  }
+
+  const summary = journal.summary();
+  assert.equal(summary.total, 40);
+  assert.equal(summary.counts["serve-blocked"], 20);
+  assert.equal(summary.counts["receipt-blocked"], 20);
+  assert.equal(summary.receipts, 40, "quantities inside a batch are summed, not dropped");
+  assert.ok(journal.entries.length <= 8, `retained ${journal.entries.length} entries`);
+  assert.equal(journal.entries.at(-1).seq, 39);
+
+  // The tail must stay a valid continuation of the chain, not a renumbering.
+  const tail = journal.entries;
+  assert.equal(tail[0].seq, 39 - tail.length + 1);
+});
+
+test("a report built on a tail still counts the whole journal", () => {
+  const journal = createJournal(null, { retainEntries: 2 });
+  for (let index = 0; index < 10; index++) journal.append("serve-blocked", { index });
+
+  const report = buildReport(journal.entries, {
+    summary: journal.summary(),
+    integrity: journal.integrity,
+    policy: { estimates: { secondsPerAd: 8, microsPerView: 1_500 } },
+    now: 2_000,
+  });
+  assert.equal(report.totals.servesBlocked, 10);
+  assert.equal(report.window.entries, 10);
+  assert.ok(report.window.retained <= 4);
+  assert.equal(report.integrity.ok, true);
+});
+
+test("a restart keeps the totals that no longer fit in memory", () => {
+  const path = tempJournal();
+  const first = createJournal(path, { retainEntries: 3 });
+  for (let index = 0; index < 12; index++) first.append("serve-blocked", { index });
+
+  const second = createJournal(path, { retainEntries: 3 });
+  assert.equal(second.summary().total, 12);
+  assert.equal(second.summary().counts["serve-blocked"], 12);
+  assert.ok(second.entries.length <= 6, `retained ${second.entries.length} entries`);
+  assert.equal(second.head(), first.head(), "the chain resumes where the file ends");
+  assert.deepEqual(second.integrity, { ok: true, brokenAt: null });
 });
 
 test("summarize counts each kind", () => {

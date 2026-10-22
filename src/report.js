@@ -14,32 +14,53 @@ function usd(micros) {
   return fraction === "" ? `$${whole}` : `$${whole}.${fraction}`;
 }
 
-export function buildReport(entries, { policy, version = "0.0.0", now = Date.now(), enabled = true, journalWriteError = null } = {}) {
-  const counts = summarize(entries);
+/**
+ * Turn entries into the numbers people read.
+ *
+ * `summary` is the journal's running totals, and is the honest source when the
+ * in-memory history is a tail: counting a truncated list would report a smaller
+ * number the busier the proxy got. Without it, the entries are the whole record
+ * and counting them is correct.
+ */
+export function buildReport(entries, {
+  policy,
+  version = "0.0.0",
+  now = Date.now(),
+  enabled = true,
+  journalWriteError = null,
+  summary = null,
+  integrity = null,
+} = {}) {
+  const counts = summary?.counts ?? summarize(entries);
   const serves = counts["serve-blocked"] ?? 0;
-  const receipts = entries
-    .filter((entry) => entry.kind === "receipt-blocked")
-    .reduce((total, entry) => total + (Number.isSafeInteger(entry.data?.count) ? entry.data.count : 1), 0);
+  const receipts = summary !== null
+    ? summary.receipts
+    : entries
+      .filter((entry) => entry.kind === "receipt-blocked")
+      .reduce((total, entry) => total + (Number.isSafeInteger(entry.data?.count) ? entry.data.count : 1), 0);
   const configs = counts["config-rewritten"] ?? 0;
 
-  const endpoints = [];
-  const seen = new Set();
-  for (const entry of entries) {
-    if (entry.kind !== "endpoint-seen") continue;
-    const key = `${entry.data?.method ?? "?"} ${entry.data?.path ?? "?"}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    endpoints.push({
-      method: entry.data?.method ?? "?",
-      path: entry.data?.path ?? "?",
-      firstSeenAt: entry.at,
-    });
+  const endpoints = summary !== null ? summary.endpoints : [];
+  if (summary === null) {
+    const seen = new Set();
+    for (const entry of entries) {
+      if (entry.kind !== "endpoint-seen") continue;
+      const key = `${entry.data?.method ?? "?"} ${entry.data?.path ?? "?"}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      endpoints.push({
+        method: entry.data?.method ?? "?",
+        path: entry.data?.path ?? "?",
+        firstSeenAt: entry.at,
+      });
+    }
   }
 
   const seconds = serves * (policy?.estimates?.secondsPerAd ?? 0);
   const microsForgone = BigInt(serves) * BigInt(policy?.estimates?.microsPerView ?? 0);
-  const firstAt = entries.length > 0 ? entries[0].at : null;
-  const lastAt = entries.length > 0 ? entries[entries.length - 1].at : null;
+  const total = summary?.total ?? entries.length;
+  const firstAt = summary !== null ? summary.firstAt : entries.length > 0 ? entries[0].at : null;
+  const lastAt = summary !== null ? summary.lastAt : entries.length > 0 ? entries[entries.length - 1].at : null;
 
   return {
     name: "adcode-blackout",
@@ -47,7 +68,8 @@ export function buildReport(entries, { policy, version = "0.0.0", now = Date.now
     generatedAt: now,
     upstream: policy?.upstream ?? null,
     enabled,
-    window: { entries: entries.length, firstAt, lastAt },
+    // `entries` is the whole record; `retained` is how much of it memory holds.
+    window: { entries: total, retained: entries.length, firstAt, lastAt },
     totals: {
       servesBlocked: serves,
       receiptsBlocked: receipts,
@@ -65,7 +87,7 @@ export function buildReport(entries, { policy, version = "0.0.0", now = Date.now
       note: "estimated from policy.estimates, not from the server's clearing price",
     },
     endpoints,
-    integrity: verifyChain(entries),
+    integrity: integrity ?? verifyChain(entries),
     journalHead: entries.length > 0 ? entries[entries.length - 1].hash : null,
     journalWriteError,
   };
