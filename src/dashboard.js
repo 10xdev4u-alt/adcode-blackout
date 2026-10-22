@@ -45,6 +45,7 @@ export function renderDashboard(report) {
   section { border-top:1px solid var(--line); padding-top:20px; margin-top:8px; }
   h2 { font-size:14px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); }
   .muted { color:var(--muted); }
+  .warn { color:var(--warn); }
   code { font-family: ui-monospace, monospace; font-size:13px; }
   .endpoints { padding-left:18px; }
   button { font:inherit; background:transparent; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; }
@@ -79,6 +80,7 @@ export function renderDashboard(report) {
 
   <section>
     <h2>Journal</h2>
+    <p class="warn" id="journal-write"${report.journalWriteError == null ? " hidden" : ""}>${report.journalWriteError == null ? "" : escape(`Journal file not writable since ${new Date(report.journalWriteError.at).toISOString()}: ${report.journalWriteError.message}. Decisions are in memory only.`)}</p>
     <p class="muted" id="chain">${escape(chain)}</p>
     <p class="muted">Every decision is appended with the previous hash. If a line is edited, deleted or reordered, the chain check names the first bad index.</p>
   </section>
@@ -102,6 +104,11 @@ export function renderDashboard(report) {
       $("state").textContent = data.enabled ? "blocking" : "paused";
       $("state").className = "state " + (data.enabled ? "" : "paused");
       $("chain").textContent = data.integrity.ok ? "chain ok" : "chain broken at " + data.integrity.brokenAt;
+      const writeError = $("journal-write");
+      writeError.hidden = !data.journalWriteError;
+      if (data.journalWriteError) {
+        writeError.textContent = "Journal file not writable since " + new Date(data.journalWriteError.at).toISOString() + ": " + data.journalWriteError.message + ". Decisions are in memory only.";
+      }
       $("toggle").textContent = data.enabled ? "Pause" : "Resume";
     } catch { /* the proxy is down; the page will try again */ }
   }

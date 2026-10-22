@@ -43,3 +43,12 @@ test("a broken chain is shown as broken, not hidden", () => {
   const broken = { ...report, integrity: { ok: false, brokenAt: 4 } };
   assert.match(renderDashboard(broken), /chain broken at 4/);
 });
+
+test("a journal that stopped accepting writes is shown, not hidden", () => {
+  const degraded = { ...report, journalWriteError: { at: 1_000, message: "EISDIR: illegal operation on a directory" } };
+  const html = renderDashboard(degraded);
+  assert.match(html, /Journal file not writable since 1970-01-01T00:00:01\.000Z/);
+  assert.match(html, /Decisions are in memory only/);
+  assert.doesNotMatch(html, /id="journal-write" hidden/);
+  assert.match(renderDashboard(report), /id="journal-write" hidden/);
+});

@@ -10,6 +10,10 @@
   docs/COMPATIBILITY.md and is the check to run before trusting a new AppImage.
 - An `--app` path that exists but is not usable (missing, not a file, under
   1 MiB) is now named back instead of falling through to "no AppImage found".
+- The dashboard shows when the journal file stopped accepting writes, instead
+  of only the CLI and the report saying so.
+- A journal that cannot be read at all (a directory in its place, a permission
+  error) now fails with the path it could not read, not a bare `EISDIR`.
 
 ## 0.3.1 - 2026-10-23
 

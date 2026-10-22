@@ -53,7 +53,12 @@ function segmentNames(filePath) {
 export function readJournalChain(filePath) {
   const entries = [];
   for (const file of [...segmentNames(filePath), ...(existsSync(filePath) ? [filePath] : [])]) {
-    entries.push(...readJournal(file));
+    try {
+      entries.push(...readJournal(file));
+    } catch (error) {
+      // A bare EISDIR sends people looking at the tool; the path is the answer.
+      throw new Error(`cannot read journal ${file}: ${String(error?.message ?? error)}`);
+    }
   }
   return entries;
 }

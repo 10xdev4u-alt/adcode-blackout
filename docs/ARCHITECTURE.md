@@ -107,7 +107,9 @@ matches.
 
 All under `/_blackout/`, never forwarded:
 
-- `GET /health` - version, enabled state, upstream, journal head, `journalWriteError`
+- `GET /health` - version, enabled state, upstream, journal head, `journalWriteError`,
+  and `requests` (application traffic counted, not journaled, so a build making
+  only pass-through calls is still visibly talking to us)
 - `GET /report` - the report JSON
 - `GET /dashboard` - the HTML dashboard (if enabled)
 - `GET /events` - server-sent events, one per journal entry
