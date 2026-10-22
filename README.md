@@ -152,7 +152,7 @@ follow a symlink and deletes only files it recognises.
 No dependencies, no build step.
 
 ```sh
-npm test                 # the whole suite, node:test
+npm test                 # 83 tests, node:test
 node bin/blackout.js help
 node scripts/smoke.js    # proxy + contract calls + a report, no app needed
 ```
@@ -160,8 +160,11 @@ node scripts/smoke.js    # proxy + contract calls + a report, no app needed
 The end-to-end check against a real AppImage is written up in
 [docs/EVIDENCE.md](docs/EVIDENCE.md). Architecture, threat model and the rule
 format are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) and
-[docs/RULES.md](docs/RULES.md).
+[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md),
+[docs/RULES.md](docs/RULES.md) and
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). The last one is the update
+checklist: what the blocker depends on and how to tell in two minutes whether a
+new ADCode release still honours it.
 
 ## Independence
 
