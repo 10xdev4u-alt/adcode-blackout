@@ -361,6 +361,59 @@ test("SIGHUP reloads a user rule pack and keeps the old one on a bad edit", asyn
   }
 });
 
+test("a broken core override falls back to the bundled pack at startup", async () => {
+  const { home } = await setup(18815);
+  const rulesDir = join(home, ".config", "blackout", "rules");
+  mkdirSync(rulesDir, { recursive: true });
+  writeFileSync(join(rulesDir, "core.json"), "{ this will not parse");
+
+  const started = run(home, ["serve", "--detach"]);
+  assert.equal(started.status, 0, started.stderr);
+  try {
+    assert.equal(await waitFor(async () => {
+      try {
+        return (await fetch("http://127.0.0.1:18815/_blackout/health")).ok;
+      } catch {
+        return false;
+      }
+    }), true);
+    const serve = await fetch("http://127.0.0.1:18815/v1/serve", { method: "POST", body: "{}" });
+    assert.equal(serve.status, 200);
+    assert.deepEqual(await serve.json(), { creatives: [] });
+
+    const journal = readFileSync(join(home, ".local", "state", "blackout", "journal.jsonl"), "utf8");
+    assert.match(journal, /rules-rejected/);
+    assert.match(journal, /fallback/);
+  } finally {
+    stopProxy(home);
+  }
+});
+
+test("doctor fails when the active rule pack cannot load", async () => {
+  const { home } = await setup(18816);
+  const rulesDir = join(home, ".config", "blackout", "rules");
+  mkdirSync(rulesDir, { recursive: true });
+  writeFileSync(join(rulesDir, "core.json"), "{ broken");
+
+  const result = run(home, ["doctor", "--json"]);
+  const report = JSON.parse(result.stdout);
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(report.ok, false);
+  assert.equal(report.checks.find((check) => check.name === "rules").state, "fail");
+  assert.match(report.checks.find((check) => check.name === "rules").detail, /core\.json/);
+});
+
+test("a custom pack with no fallback refuses to start", async () => {
+  const { home } = await setup(18817);
+  const configPath = join(home, ".config", "blackout", "config.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  config.rules = "missing";
+  writeFileSync(configPath, JSON.stringify(config));
+  const result = run(home, ["serve", "--detach"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing\.json/);
+});
+
 test("config shows the effective policy", async () => {
   const { home } = await setup(18810);
   const result = run(home, ["config"]);
