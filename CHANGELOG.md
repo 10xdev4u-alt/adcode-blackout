@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- A blocked request's body is now consumed before the answer is sent. Answering
+  first made Node destroy the socket afterwards, so a large `serve` body cost a
+  new connection every time and could cut the response off. The wait is bounded
+  at two seconds, so a client that never finishes cannot hold the answer.
+- A broken config now names the file it could not read, instead of saying
+  "policy file" and leaving the reader to guess which one.
+- The proxy test fixture is restored after the test that takes the upstream
+  away. It was left on a stand-in answering `{}` to every request, so every test
+  after it was measuring the wrong thing.
+
 ## 0.4.3 - 2026-10-23
 
 - `blackout compat` explains a build that quits immediately with no traffic:
