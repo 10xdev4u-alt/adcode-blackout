@@ -106,5 +106,5 @@ export function summarize(entries) {
   for (const entry of entries) {
     counts[entry.kind] = (counts[entry.kind] ?? 0) + 1;
   }
-  return counts;
+  return { ...counts };
 }

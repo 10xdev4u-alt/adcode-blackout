@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createJournal, GENESIS, readJournal, summarize, verifyChain } from "../src/journal.js";
@@ -58,7 +58,6 @@ test("a truncated final line is dropped, not fatal", () => {
   const journal = createJournal(path);
   journal.append("a", { n: 1 });
   journal.append("b", { n: 2 });
-  const { appendFileSync } = require("node:fs");
   appendFileSync(path, '{"seq":2,"at":');
 
   const entries = readJournal(path);
