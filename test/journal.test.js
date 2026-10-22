@@ -1,6 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createJournal, GENESIS, readJournal, readJournalChain, summarize, verifyChain } from "../src/journal.js";
@@ -121,6 +121,30 @@ test("tampering in a rotated segment is named at its absolute index", () => {
 
   const all = readJournalChain(path);
   assert.deepEqual(verifyChain(all), { ok: false, brokenAt: 1 });
+});
+
+test("a journal that cannot be written keeps the decision and reports the failure", () => {
+  const path = tempJournal();
+  const journal = createJournal(path);
+  // The target becomes a directory, so every append fails with EISDIR whatever
+  // user the tests run as - a chmod-based simulation passes as root.
+  mkdirSync(path);
+
+  const entry = journal.append("serve-blocked", { path: "/v1/serve" });
+  assert.equal(entry.seq, 0);
+  assert.equal(journal.entries.length, 1);
+  assert.deepEqual(verifyChain(journal.entries), { ok: true, brokenAt: null });
+
+  assert.notEqual(journal.writeError, null);
+  assert.match(journal.writeError.message, /EISDIR/);
+  assert.ok(Number.isSafeInteger(journal.writeError.at));
+
+  // The first failure is the moment the record stopped being complete, so a
+  // later failure must not move that timestamp.
+  const firstFailure = journal.writeError;
+  journal.append("serve-blocked", { path: "/v1/serve" });
+  assert.equal(journal.entries.length, 2);
+  assert.equal(journal.writeError, firstFailure);
 });
 
 test("summarize counts each kind", () => {

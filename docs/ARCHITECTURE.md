@@ -92,6 +92,13 @@ absolute index. Rotation bounds each file, not the total history: at roughly 200
 bytes per decision, 5 MiB is about 25,000 decisions, and a year of ticks is a few
 segments. `blackout verify` and an offline `blackout report` read every segment.
 
+A failed write never becomes a failed decision. If the state directory is full
+or read-only, the entry stays in memory, the request is still blocked, and the
+first failure is kept as `{at, message}` and surfaced by `/health`, `status`,
+`doctor` and the report. The gap it leaves on disk is not hidden: after a
+restart `verify` names the entry where the chain broke, which is the truthful
+reading of a record that stopped being written.
+
 The chain is tamper-evident, not tamper-proof. Its value is that a report can
 name a head hash; changing history after that means the published head no longer
 matches.
@@ -100,7 +107,7 @@ matches.
 
 All under `/_blackout/`, never forwarded:
 
-- `GET /health` - version, enabled state, upstream, journal head
+- `GET /health` - version, enabled state, upstream, journal head, `journalWriteError`
 - `GET /report` - the report JSON
 - `GET /dashboard` - the HTML dashboard (if enabled)
 - `GET /events` - server-sent events, one per journal entry

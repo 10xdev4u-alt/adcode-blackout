@@ -14,7 +14,7 @@ function usd(micros) {
   return fraction === "" ? `$${whole}` : `$${whole}.${fraction}`;
 }
 
-export function buildReport(entries, { policy, version = "0.0.0", now = Date.now(), enabled = true } = {}) {
+export function buildReport(entries, { policy, version = "0.0.0", now = Date.now(), enabled = true, journalWriteError = null } = {}) {
   const counts = summarize(entries);
   const serves = counts["serve-blocked"] ?? 0;
   const receipts = entries
@@ -67,6 +67,7 @@ export function buildReport(entries, { policy, version = "0.0.0", now = Date.now
     endpoints,
     integrity: verifyChain(entries),
     journalHead: entries.length > 0 ? entries[entries.length - 1].hash : null,
+    journalWriteError,
   };
 }
 
@@ -90,5 +91,9 @@ export function formatReport(report) {
   lines.push(report.integrity.ok
     ? `journal chain ok, head ${String(report.journalHead).slice(0, 12)}…`
     : `journal chain BROKEN at entry ${report.integrity.brokenAt}`);
+  if (report.journalWriteError != null) {
+    lines.push(`journal file NOT writable since ${new Date(report.journalWriteError.at).toISOString()}: ${report.journalWriteError.message}`);
+    lines.push("decisions from that point are in memory only and will not survive a restart");
+  }
   return lines.join("\n");
 }
