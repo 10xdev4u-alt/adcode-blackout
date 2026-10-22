@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The optional systemd unit now runs sandboxed: state directory only, no new
+  privileges, private `/tmp`, read-only system and home.
 - Requests whose `Host` is not loopback are refused with `421` and journaled as
   `host-rejected`. This closes the DNS-rebinding path to pause/resume, which the
   custom control header alone did not cover.

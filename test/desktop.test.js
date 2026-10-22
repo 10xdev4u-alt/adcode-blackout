@@ -151,6 +151,11 @@ test("the unit carries the resolved node and CLI, and can be removed", () => {
   const path = installUnit({ home, node: "/usr/bin/node", cli: "/opt/blackout.js", port: 9000 });
   const text = readFileSync(path, "utf8");
   assert.match(text, /ExecStart="\/usr\/bin\/node" "\/opt\/blackout\.js" serve --foreground --port 9000/);
+  assert.match(text, /StateDirectory=blackout/);
+  assert.match(text, /NoNewPrivileges=yes/);
+  assert.match(text, /PrivateTmp=yes/);
+  assert.match(text, /ProtectSystem=strict/);
+  assert.match(text, /ProtectHome=read-only/);
   assert.equal(removeUnit(home), true);
   assert.equal(existsSync(unitPath(home)), false);
 });
