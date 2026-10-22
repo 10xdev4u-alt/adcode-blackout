@@ -1,0 +1,153 @@
+/**
+ * The test the README promises: install, launch, look, uninstall.
+ *
+ * Everything here runs through the real CLI in a real child process, against a
+ * temporary HOME, so it exercises the same path a person does - including the
+ * detached proxy that `launch` starts and the wrapper that survives it.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const CLI = fileURLToPath(new URL("../bin/blackout.js", import.meta.url));
+const PORT = 18793;
+
+function run(home, args, extraEnv = {}) {
+  return spawnSync(process.execPath, [CLI, ...args], {
+    encoding: "utf8",
+    timeout: 30_000,
+    env: {
+      ...process.env,
+      HOME: home,
+      BLACKOUT_HOME: join(home, ".config", "blackout"),
+      BLACKOUT_STATE: join(home, ".local", "state", "blackout"),
+      ...extraEnv,
+    },
+  });
+}
+
+async function setup() {
+  const home = await mkdtemp(join(tmpdir(), "blackout-cli-"));
+  mkdirSync(join(home, "Applications"), { recursive: true });
+  mkdirSync(join(home, ".config", "blackout"), { recursive: true });
+  writeFileSync(
+    join(home, ".config", "blackout", "config.json"),
+    `${JSON.stringify({ port: PORT, upstream: "http://127.0.0.1:9" }, null, 2)}\n`,
+  );
+
+  const out = join(home, "launched.txt");
+  const app = join(home, "Applications", "ADCode-2.4.0.AppImage");
+  writeFileSync(
+    app,
+    `#!/bin/sh\nprintf '%s\\n' "$ADCODE_AD_SERVER" > '${out}'\nfor arg in "$@"; do printf '%s\\n' "$arg" >> '${out}'; done\n${"#".repeat(1_200_000)}`,
+  );
+  chmodSync(app, 0o755);
+  return { home, app, out };
+}
+
+function stopProxy(home) {
+  const pidFile = join(home, ".local", "state", "blackout", "blackout.pid");
+  if (!existsSync(pidFile)) return;
+  const pid = Number(readFileSync(pidFile, "utf8").trim());
+  if (!Number.isSafeInteger(pid) || pid <= 1) return;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    /* already gone */
+  }
+}
+
+async function waitFor(check, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+test("install, launch, pause, report, verify, uninstall", async () => {
+  const { home, app, out } = await setup();
+  try {
+    const installed = run(home, ["install", "--app", app]);
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stdout, /launcher/);
+    const wrapper = join(home, ".local", "bin", "adcode");
+    assert.ok(existsSync(wrapper));
+    assert.match(readFileSync(wrapper, "utf8"), /adcode-blackout launcher/);
+
+    const launched = run(home, ["launch", "--app", app, "--", "--no-sandbox"]);
+    assert.equal(launched.status, 0, launched.stderr);
+    const lines = readFileSync(out, "utf8").trim().split("\n");
+    assert.equal(lines[0], `http://127.0.0.1:${PORT}`);
+    assert.deepEqual(lines.slice(1), ["--no-sandbox"]);
+
+    const health = await waitFor(async () => {
+      try {
+        return (await fetch(`http://127.0.0.1:${PORT}/_blackout/health`)).ok;
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(health, true, "the detached proxy should answer");
+
+    const status = run(home, ["status"]);
+    assert.equal(status.status, 0, status.stderr);
+    assert.match(status.stdout, /blocking/);
+
+    const paused = run(home, ["pause"]);
+    assert.equal(paused.status, 0, paused.stderr);
+    assert.match(paused.stdout, /paused/);
+
+    const resumed = run(home, ["resume"]);
+    assert.match(resumed.stdout, /blocking/);
+
+    const report = run(home, ["report", "--json"]);
+    assert.equal(report.status, 0, report.stderr);
+    const parsed = JSON.parse(report.stdout);
+    assert.equal(parsed.name, "adcode-blackout");
+    assert.equal(parsed.integrity.ok, true);
+
+    const verified = run(home, ["verify"]);
+    assert.equal(verified.status, 0, verified.stderr);
+    assert.match(verified.stdout, /^ok:/);
+
+    const doctor = run(home, ["doctor"]);
+    assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+    assert.match(doctor.stdout, /ok\s+appimage/);
+  } finally {
+    stopProxy(home);
+    const stopped = await waitFor(async () => {
+      try {
+        await fetch(`http://127.0.0.1:${PORT}/_blackout/health`, { signal: AbortSignal.timeout(200) });
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    assert.equal(stopped, true, "the proxy should stop when asked");
+  }
+
+  const removed = run(home, ["uninstall"]);
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.equal(existsSync(join(home, ".local", "bin", "adcode")), false);
+});
+
+test("an unknown command is a usage error, not a stack trace", async () => {
+  const { home } = await setup();
+  const result = run(home, ["frobnicate"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /unknown command/);
+});
+
+test("launch without an AppImage says how to point at one", async () => {
+  const home = await mkdtemp(join(tmpdir(), "blackout-cli-empty-"));
+  const result = run(home, ["launch"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /no ADCode AppImage found/);
+});
