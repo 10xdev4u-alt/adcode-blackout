@@ -404,12 +404,20 @@ async function commandDoctor() {
   );
 
   const wrapper = wrapperPath();
-  let wrapperOk = false;
-  if (existsSync(wrapper)) {
-    wrapperOk = readFileSync(wrapper, "utf8").includes("# adcode-blackout launcher");
-    add(wrapperOk ? "ok" : "warn", "launcher", wrapperOk ? wrapper : `${wrapper} exists but is not ours`);
-  } else {
+  if (!existsSync(wrapper)) {
     add("warn", "launcher", "not installed; run `blackout install`");
+  } else if (!readFileSync(wrapper, "utf8").includes("# adcode-blackout launcher")) {
+    add("warn", "launcher", `${wrapper} exists but is not ours`);
+  } else {
+    // A moved checkout leaves a wrapper that still runs an older copy. That is
+    // not broken enough to fail doctor - it still blocks - but it is not this
+    // code, and only the user can decide to reinstall.
+    const target = /'([^']*)' launch -- "\$@"/.exec(readFileSync(wrapper, "utf8"))?.[1] ?? null;
+    if (target !== null && target !== CLI) {
+      add("warn", "launcher", `${wrapper} points at ${target}; run \`blackout install\` again`);
+    } else {
+      add("ok", "launcher", wrapper);
+    }
   }
 
   if (policy !== undefined) {
