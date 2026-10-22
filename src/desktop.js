@@ -284,6 +284,14 @@ Type=simple
 ExecStart="${node}" "${cli}" serve --foreground --port ${port}
 Restart=on-failure
 RestartSec=2
+# The proxy needs to read the install, write its own state and listen on
+# loopback. Nothing else. StateDirectory is the same path as the default
+# stateHome(), so no environment variable is required.
+StateDirectory=blackout
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
 
 [Install]
 WantedBy=default.target
