@@ -12,6 +12,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { configHome } from "./policy.js";
 
 export const ACTIONS = new Set(["empty-serve", "ack-receipts", "rewrite-config", "block", "pass"]);
@@ -81,6 +82,11 @@ export function validatePack(pack) {
     detect: Array.isArray(pack.detect) ? pack.detect.filter((item) => typeof item === "string") : [],
     rules: Object.freeze(rules),
   });
+}
+
+/** The pack that shipped with this install, regardless of any override. */
+export function bundledRulePath(name = "core") {
+  return fileURLToPath(ruleUrl(name));
 }
 
 export function loadRulePack(name = "core", file = null) {
