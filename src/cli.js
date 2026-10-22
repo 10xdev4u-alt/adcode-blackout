@@ -39,13 +39,14 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
       --desktop    also repoint matching .desktop entries at the launcher
       --autostart  also install and enable a systemd user unit
 
-  blackout launch [--app PATH] [-- ARGS...]
+  blackout launch [--app PATH] [--dry-run] [-- ARGS...]
       Start the proxy if needed, then start ADCode with ADCODE_AD_SERVER set.
+      --dry-run    print the resolved AppImage, URL and argv; start nothing
 
   blackout serve [--port N] [--foreground|--detach]
       Run the proxy. Foreground by default.
 
-  blackout status | report [--json] | verify
+  blackout status [--json] | report [--json] | verify
   blackout pause | resume
   blackout doctor
   blackout uninstall [--keep-wrapper]
@@ -152,6 +153,18 @@ async function commandLaunch(values, rest) {
       2,
     );
   }
+
+  if (values["dry-run"]) {
+    const url = proxyUrl(policy);
+    const health = await probe(url);
+    console.log(`appimage   ${resolved.path}`);
+    console.log(`resolved   ${resolved.reason}`);
+    console.log(`proxy      ${url} (${health === null ? "not running; would start it" : "running"})`);
+    console.log(`env        ADCODE_AD_SERVER=${url}`);
+    console.log(`argv       ${[resolved.path, ...rest].join(" ")}`);
+    return 0;
+  }
+
   recordAppImage(resolved.path);
 
   const ready = await ensureProxy({ policy, cli: CLI });
@@ -231,16 +244,36 @@ async function commandUninstall(values) {
   return 0;
 }
 
-async function commandStatus() {
+async function commandStatus(values) {
   const policy = readPolicy();
   const url = proxyUrl(policy);
   const health = await probe(url);
   if (health === null) {
-    console.log(`blackout ${VERSION}`);
-    console.log(`state      not running (${url})`);
+    if (values.json) {
+      console.log(JSON.stringify({ name: "adcode-blackout", version: VERSION, url, running: false }, null, 2));
+    } else {
+      console.log(`blackout ${VERSION}`);
+      console.log(`state      not running (${url})`);
+    }
     return 1;
   }
   const report = await request(`${url}/_blackout/report`);
+  if (values.json) {
+    const totals = report.ok ? report.body.totals : null;
+    const integrity = report.ok ? report.body.integrity : null;
+    console.log(JSON.stringify({
+      name: "adcode-blackout",
+      version: health.version,
+      url,
+      running: true,
+      enabled: health.enabled,
+      upstream: health.upstream,
+      uptimeMs: health.uptimeMs,
+      totals,
+      integrity,
+    }, null, 2));
+    return 0;
+  }
   console.log(`blackout ${health.version} at ${url}`);
   console.log(`state      ${health.enabled ? "blocking" : "paused"}`);
   console.log(`upstream   ${health.upstream}`);
@@ -374,7 +407,7 @@ export async function main(argv) {
         return await commandServe(values);
       }
       case "launch": {
-        const { values } = parseArgs({ args, options: { app: { type: "string" } } });
+        const { values } = parseArgs({ args, options: { app: { type: "string" }, "dry-run": { type: "boolean" } } });
         return await commandLaunch(values, passthrough);
       }
       case "install": {
@@ -392,8 +425,10 @@ export async function main(argv) {
         const { values } = parseArgs({ args, options: { "keep-wrapper": { type: "boolean" } } });
         return await commandUninstall(values);
       }
-      case "status":
-        return await commandStatus();
+      case "status": {
+        const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });
+        return await commandStatus(values);
+      }
       case "report": {
         const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });
         return await commandReport(values);
