@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `scripts/soak.js` (`npm run soak`) drives a mixed load against a proxy and
+  fails on a broken chain, drifting counters, descriptors that do not settle, or
+  a heap that keeps growing in the second half. `CONTRIBUTING.md` says when to
+  run it. Sixty seconds at 25 req/s currently ends with the heap flat, the
+  descriptor count back at its baseline, and every count matching what was sent.
 - A blocked request's body is now consumed before the answer is sent. Answering
   first made Node destroy the socket afterwards, so a large `serve` body cost a
   new connection every time and could cut the response off. The wait is bounded
