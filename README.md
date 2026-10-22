@@ -76,6 +76,7 @@ blackout status --json     # same facts, for a script
 blackout report
 blackout verify
 blackout doctor
+blackout rules             # the active pack, with --json for the raw object
 ```
 
 Diagnose a launch without starting an editor:

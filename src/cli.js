@@ -46,7 +46,9 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
   blackout serve [--port N] [--foreground|--detach]
       Run the proxy. Foreground by default.
 
+  blackout rules [--json]
   blackout status [--json] | report [--json] | verify
+  blackout --version | version
   blackout pause | resume
   blackout doctor
   blackout uninstall [--keep-wrapper]
@@ -244,6 +246,27 @@ async function commandUninstall(values) {
   return 0;
 }
 
+async function commandRules(values) {
+  const policy = readPolicy();
+  const pack = loadRulePack(policy.rules);
+  if (values.json) {
+    // The loaded pack is normalised: a pattern is a RegExp, which JSON would
+    // render as {}. Emit the source instead of a lossy object.
+    console.log(JSON.stringify({
+      ...pack,
+      rules: pack.rules.map((rule) => ({ ...rule, pattern: rule.pattern === null ? null : String(rule.pattern) })),
+    }, null, 2));
+    return 0;
+  }
+  console.log(`pack       ${pack.name} v${pack.version}`);
+  console.log(`rules      ${pack.rules.length}`);
+  for (const rule of pack.rules) {
+    const match = rule.path ?? String(rule.pattern);
+    console.log(`  ${rule.id.padEnd(16)} ${rule.method.padEnd(5)} ${rule.action.padEnd(14)} ${match}`);
+  }
+  return 0;
+}
+
 async function commandStatus(values) {
   const policy = readPolicy();
   const url = proxyUrl(policy);
@@ -388,6 +411,10 @@ export async function main(argv) {
     process.stdout.write(USAGE);
     return 0;
   }
+  if (command === "--version" || command === "version") {
+    console.log(VERSION);
+    return 0;
+  }
 
   const dash = rest.indexOf("--");
   const args = dash === -1 ? rest : rest.slice(0, dash);
@@ -424,6 +451,10 @@ export async function main(argv) {
       case "uninstall": {
         const { values } = parseArgs({ args, options: { "keep-wrapper": { type: "boolean" } } });
         return await commandUninstall(values);
+      }
+      case "rules": {
+        const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });
+        return await commandRules(values);
       }
       case "status": {
         const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });

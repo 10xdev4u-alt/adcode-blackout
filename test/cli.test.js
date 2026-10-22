@@ -146,6 +146,30 @@ test("install, launch, pause, report, verify, uninstall", async () => {
   assert.equal(existsSync(join(home, ".local", "bin", "adcode")), false);
 });
 
+test("rules prints the active pack, and --json prints it whole", async () => {
+  const { home } = await setup(18797);
+  const text = run(home, ["rules"]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /pack\s+core v1/);
+  assert.match(text.stdout, /serve-v1\s+POST\s+empty-serve\s+\/v1\/serve/);
+
+  const json = run(home, ["rules", "--json"]);
+  assert.equal(json.status, 0, json.stderr);
+  const pack = JSON.parse(json.stdout);
+  assert.equal(pack.name, "core");
+  assert.ok(pack.rules.some((rule) => rule.id === "receipts-v1"));
+  assert.ok(pack.rules.every((rule) => typeof rule.action === "string"));
+});
+
+test("version is printed without starting anything", async () => {
+  const { home } = await setup(18798);
+  for (const args of [["--version"], ["version"]]) {
+    const result = run(home, args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^\d+\.\d+\.\d+\n$/);
+  }
+});
+
 test("an unknown command is a usage error, not a stack trace", async () => {
   const { home } = await setup();
   const result = run(home, ["frobnicate"]);
