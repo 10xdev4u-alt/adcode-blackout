@@ -50,6 +50,7 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
 
   blackout rules [--json]
   blackout status [--json] | report [--json] | verify
+  blackout events [--json] [--once]
   blackout --version | version
   blackout pause | resume
   blackout doctor
@@ -330,6 +331,74 @@ async function commandRules(values) {
   return 0;
 }
 
+function eventLine(entry) {
+  const time = new Date(entry.at).toISOString().slice(11, 19);
+  const data = entry.data ?? {};
+  const detail = data.path ?? data.reason ?? "";
+  const rule = data.rule === undefined ? "" : ` rule=${data.rule}`;
+  const count = data.count === undefined ? "" : ` count=${data.count}`;
+  return `${time} ${String(entry.kind).padEnd(16)} ${detail}${rule}${count}`.trimEnd();
+}
+
+/**
+ * Follow the decision stream.
+ *
+ * This talks to the proxy, not to the journal file, so it sees entries even
+ * while another process holds the file and it shares the dashboard's transport.
+ * `--once` exists because a human is not the only caller: a script that wants
+ * "the next decision" should not need a timeout and a kill.
+ */
+async function commandEvents(values) {
+  const policy = readPolicy();
+  const url = `${proxyUrl(policy)}/_blackout/events`;
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal, headers: { accept: "text/event-stream" } });
+    if (!response.ok || response.body === null) return fail(`proxy is not running at ${proxyUrl(policy)}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let split;
+        while ((split = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          const data = block.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6)).join("\n");
+          if (data === "") continue;
+          let entry;
+          try {
+            entry = JSON.parse(data);
+          } catch {
+            continue;
+          }
+          console.log(values.json ? JSON.stringify(entry) : eventLine(entry));
+          if (values.once) {
+            controller.abort();
+            return 0;
+          }
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return 0;
+  } finally {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+  }
+}
+
 async function commandStatus(values) {
   const policy = readPolicy();
   const url = proxyUrl(policy);
@@ -534,6 +603,10 @@ export async function main(argv) {
           options: { "keep-wrapper": { type: "boolean" }, purge: { type: "boolean" } },
         });
         return await commandUninstall(values);
+      }
+      case "events": {
+        const { values } = parseArgs({ args, options: { json: { type: "boolean" }, once: { type: "boolean" } } });
+        return await commandEvents(values);
       }
       case "rules": {
         const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });
