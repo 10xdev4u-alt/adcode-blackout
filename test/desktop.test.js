@@ -172,3 +172,12 @@ test("renderWrapper survives a path containing a single quote", () => {
   const wrapper = renderWrapper({ node: "/bin/node", cli: "/tmp/a'b/blackout.js" });
   assert.match(wrapper, /'\/tmp\/a'\\''b\/blackout\.js'/);
 });
+
+test("an explicit path that cannot be used is named back", () => {
+  const tiny = join(home, "Applications", "ADCode-small.AppImage");
+  writeFileSync(tiny, "not really");
+  const resolved = resolveAppImage({ home, env: {}, explicit: tiny });
+  assert.equal(resolved.found, false);
+  assert.equal(resolved.rejected, tiny);
+  assert.equal(resolveAppImage({ home, env: {} }).rejected, null);
+});
