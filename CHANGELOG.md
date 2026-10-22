@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A malformed `core` override at startup falls back to the bundled pack and
+  journals `rules-rejected` with `fallback`, instead of starting unprotected.
+  `doctor` now checks that the active pack loads and names its source.
 - A user rule pack at `~/.config/blackout/rules/<name>.json` overrides the
   bundled pack, validated by the same loader. `SIGHUP` reloads it live:
   `rules-reloaded` on success, `rules-rejected` plus the old pack on a typo.
