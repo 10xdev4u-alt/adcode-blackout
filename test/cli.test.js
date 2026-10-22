@@ -317,6 +317,43 @@ test("an unknown command is a usage error, not a stack trace", async () => {
   assert.match(result.stderr, /unknown command/);
 });
 
+test("config shows the effective policy", async () => {
+  const { home } = await setup(18810);
+  const result = run(home, ["config"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /listen\s+127\.0\.0\.1:18810/);
+  assert.match(result.stdout, /dashboard\s+on/);
+  assert.match(result.stdout, /rules\s+core/);
+});
+
+test("config writes only after validation, and persists", async () => {
+  const { home } = await setup(18811);
+  const changed = run(home, ["config", "--port", "18812", "--dashboard", "off", "--rules", "core"]);
+  assert.equal(changed.status, 0, changed.stderr);
+  assert.match(changed.stdout, /listen\s+127\.0\.0\.1:18812/);
+  assert.match(changed.stdout, /dashboard\s+off/);
+
+  const file = join(home, ".config", "blackout", "config.json");
+  const saved = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(saved.port, 18812);
+  assert.equal(saved.dashboard, false);
+  assert.equal(saved.upstream, "http://127.0.0.1:9");
+
+  const shown = run(home, ["config", "--show"]);
+  assert.match(shown.stdout, /127\.0\.0\.1:18812/);
+});
+
+test("config refuses an invalid value and leaves the file alone", async () => {
+  const { home } = await setup(18813);
+  const before = readFileSync(join(home, ".config", "blackout", "config.json"), "utf8");
+  for (const args of [["--port", "70000"], ["--upstream", "not a url"], ["--dashboard", "maybe"]]) {
+    const result = run(home, ["config", ...args]);
+    assert.ok([1, 2].includes(result.status), `expected failure for ${args.join(" ")}`);
+    assert.match(result.stderr, /blackout:/);
+  }
+  assert.equal(readFileSync(join(home, ".config", "blackout", "config.json"), "utf8"), before);
+});
+
 test("doctor --json is a stable object with one entry per check", async () => {
   const { home, app } = await setup(18806);
   const installed = run(home, ["install", "--app", app]);
