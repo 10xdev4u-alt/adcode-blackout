@@ -317,6 +317,35 @@ test("an unknown command is a usage error, not a stack trace", async () => {
   assert.match(result.stderr, /unknown command/);
 });
 
+test("doctor --json is a stable object with one entry per check", async () => {
+  const { home, app } = await setup(18806);
+  const installed = run(home, ["install", "--app", app]);
+  assert.equal(installed.status, 0, installed.stderr);
+
+  const result = run(home, ["doctor", "--json"]);
+  const report = JSON.parse(result.stdout);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(report.name, "adcode-blackout");
+  assert.equal(report.ok, true);
+  assert.ok(Array.isArray(report.checks));
+  const names = report.checks.map((check) => check.name);
+  assert.ok(names.includes("appimage"));
+  assert.ok(names.includes("launcher"));
+  const appimage = report.checks.find((check) => check.name === "appimage");
+  assert.equal(appimage.state, "ok");
+  assert.match(appimage.detail, /^(.*\(recorded\)|.*\(explicit\))$/);
+  for (const check of report.checks) assert.match(check.state, /^(ok|warn|fail)$/);
+});
+
+test("doctor --json fails the process when a check fails", async () => {
+  const home = await mkdtemp(join(tmpdir(), "blackout-cli-empty-"));
+  const result = run(home, ["doctor", "--json"]);
+  const report = JSON.parse(result.stdout);
+  assert.equal(result.status, 1);
+  assert.equal(report.ok, false);
+  assert.equal(report.checks.find((check) => check.name === "appimage").state, "fail");
+});
+
 test("status --json is explicit about not running", async () => {
   const { home } = await setup(18795);
   const result = run(home, ["status", "--json"]);
