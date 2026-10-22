@@ -26,6 +26,15 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const BODY_LIMIT = 2 * 1024 * 1024;
 const CONFIG_TIMEOUT_MS = 8_000;
 /**
+ * How much of a config response is worth reading.
+ *
+ * The real document is a few hundred bytes. `response.text()` has no limit, so
+ * a wrong or compromised upstream answering with a huge body used to cost the
+ * whole thing in memory before the parse failed: a 200 MiB response drove peak
+ * RSS to 723 MiB to reach the same safe fallback.
+ */
+const CONFIG_LIMIT_BYTES = 1024 * 1024;
+/**
  * How far a client may fall behind on the decision stream.
  *
  * `res.write` returns false when the socket is full, and ignoring that turns a
@@ -272,7 +281,11 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       case "rewrite-config": {
         const upstream = await fetchUpstream(url.pathname, req);
         if (!upstream.ok) {
-          journal.append("config-degraded", { path: url.pathname, status: upstream.status });
+          journal.append("config-degraded", {
+            path: url.pathname,
+            status: upstream.status,
+            ...(upstream.reason === undefined ? {} : { reason: upstream.reason }),
+          });
           sendJson(res, 200, SAFE_CONFIG, { "x-blackout": "config-safe" });
           return;
         }
@@ -308,7 +321,22 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
         headers: { ...upstreamHeaders(req), accept: "application/json" },
         signal: AbortSignal.timeout(CONFIG_TIMEOUT_MS),
       });
-      return { ok: response.ok, status: response.status, text: await response.text() };
+      if (response.body === null) return { ok: false, status: response.status, text: "", reason: "empty body" };
+
+      const reader = response.body.getReader();
+      const chunks = [];
+      let size = 0;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > CONFIG_LIMIT_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          return { ok: false, status: response.status, text: "", reason: `config body over ${CONFIG_LIMIT_BYTES} bytes` };
+        }
+        chunks.push(value);
+      }
+      return { ok: response.ok, status: response.status, text: Buffer.concat(chunks).toString("utf8") };
     } catch (error) {
       return { ok: false, status: 0, text: "", reason: String(error?.message ?? error) };
     }
