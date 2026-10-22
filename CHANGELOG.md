@@ -11,6 +11,8 @@
 - The harness launches with `ADCODE_SETTLE_MS=0`, the development override the
   evidence run used, so the first-install settle grace cannot swallow the
   window.
+- `blackout compat -- ARGS...` passes arguments to the app, so a container that
+  needs `--no-sandbox` can run the harness.
 
 ## 0.4.0 - 2026-10-23
 

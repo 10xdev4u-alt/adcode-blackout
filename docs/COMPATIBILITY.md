@@ -43,6 +43,10 @@ The harness launches with `ADCODE_SETTLE_MS=0`, the development override the
 evidence run used, so the first-install settle grace does not swallow the
 window. Normal launches through `blackout launch` keep the grace.
 
+Arguments after `--` go to the app: `blackout compat -- --no-sandbox` in a
+container, or `xvfb-run -a blackout compat` with no display. Under `xvfb`, GPU
+and zygote errors in the kept app log are normal.
+
 The harness uses its own journal in a temp directory and never touches the
 installed state, so it can run while the normal blocker is up.
 

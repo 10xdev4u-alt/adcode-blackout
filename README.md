@@ -96,6 +96,7 @@ After an app update, prove the contract with the build itself:
 blackout compat                 # 60s window, then a verdict
 blackout compat --seconds 180   # longer, if no ad slot came up
 blackout compat --json          # the verdict as an object, for CI
+blackout compat -- --no-sandbox # args after -- go to the app
 ```
 
 It starts a private proxy on an ephemeral port, launches the AppImage against

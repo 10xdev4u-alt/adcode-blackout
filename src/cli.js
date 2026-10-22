@@ -46,10 +46,11 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
       Start the proxy if needed, then start ADCode with ADCODE_AD_SERVER set.
       --dry-run    print the resolved AppImage, URL and argv; start nothing
 
-  blackout compat [--app PATH] [--seconds N] [--json] [--keep]
+  blackout compat [--app PATH] [--seconds N] [--json] [--keep] [-- ARGS...]
       Launch a build against a private proxy and judge whether it still calls
-      /v1/serve and /v1/config, and whether anything ad-like slips past the
-      pack. Exit 0 pass, 1 inconclusive, 2 fail.
+      /v1/serve, and whether anything ad-like slips past the pack. ARGS go to
+      the app, e.g. -- --no-sandbox in a container. Exit 0 pass, 1
+      inconclusive, 2 fail.
 
   blackout serve [--port N] [--foreground|--detach]
       Run the proxy. Foreground by default.
@@ -567,7 +568,7 @@ function commandVerify() {
   return 1;
 }
 
-async function commandCompat(values) {
+async function commandCompat(values, rest = []) {
   const policy = readPolicy();
   const resolved = resolveAppImage({ explicit: values.app ?? null });
   if (!resolved.found) return noAppImage(resolved);
@@ -588,7 +589,7 @@ async function commandCompat(values) {
   console.error(`blackout: starting ${resolved.path} against a private proxy for ${seconds}s`);
   console.error("blackout: open a file and keep the editor focused until the window closes");
 
-  const result = await runCompat({ appImage: resolved.path, seconds, policy, rules, keep: values.keep === true });
+  const result = await runCompat({ appImage: resolved.path, args: rest, seconds, policy, rules, keep: values.keep === true });
 
   if (values.json) console.log(JSON.stringify({ ...result, appImage: resolved.path }, null, 2));
   else console.log(formatCompat({ ...result, appImage: resolved.path }));
@@ -788,7 +789,7 @@ export async function main(argv) {
             keep: { type: "boolean" },
           },
         });
-        return await commandCompat(values);
+        return await commandCompat(values, passthrough);
       }
       case "verify":
         return commandVerify();
