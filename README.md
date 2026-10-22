@@ -77,6 +77,7 @@ blackout report
 blackout verify
 blackout doctor
 blackout rules             # the active pack, with --json for the raw object
+blackout events            # follow decisions live; --once for scripts
 ```
 
 Diagnose a launch without starting an editor:
