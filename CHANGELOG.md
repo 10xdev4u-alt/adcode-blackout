@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.3 - 2026-10-23
 
 - `blackout compat` explains a build that quits immediately with no traffic:
   a second instance of ADCode focuses the first one and exits, so the answer is
