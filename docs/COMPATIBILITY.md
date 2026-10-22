@@ -23,13 +23,25 @@ blackout compat
 ```
 
 It starts a private proxy on an ephemeral port, launches the AppImage against
-it for 60 seconds, and judges what happened: did `/v1/serve` get answered, did
-`/v1/config` get rewritten, did the app call anything ad-like outside the pack,
-did it die. Exit `0` is a pass, `1` is inconclusive (the app talked to the
-proxy but had no ad opportunity - open the editor, keep it focused, run
-`blackout compat --seconds 180`), `2` is a failure. A run that is not a pass
-keeps its journal and the app's log and prints both paths, so a failure can be
-read rather than guessed at. `--json` prints the same verdict as an object.
+it for 60 seconds, and judges what happened: was `/v1/serve` answered, did the
+app call anything ad-like outside the pack, did it refuse the proxy's Host, did
+it die. Exit `0` is a pass, `1` is inconclusive (the app talked to the proxy but
+had no ad opportunity - open the editor, keep it focused, run `blackout compat
+--seconds 180`), `2` is a failure. A run that is not a pass keeps its journal
+and the app's log and prints both paths, so a failure can be read rather than
+guessed at. `--json` prints the same verdict as an object.
+
+A pass needs `serve` answered. A config rewrite is evidence when it happens, but
+not a requirement: with `ADCODE_AD_SERVER` set, a stock build sends `dev-token`
+instead of a real credential, production answers 401, and the proxy serves
+`SAFE_CONFIG` (kill switch on, cap zero) itself - so the block still holds and
+the harness reports the rewrite as unverified rather than failing the build.
+A 200 that cannot be parsed is different, and is a failure: that is the schema
+having moved.
+
+The harness launches with `ADCODE_SETTLE_MS=0`, the development override the
+evidence run used, so the first-install settle grace does not swallow the
+window. Normal launches through `blackout launch` keep the grace.
 
 The harness uses its own journal in a temp directory and never touches the
 installed state, so it can run while the normal blocker is up.

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `blackout compat` no longer requires a rewritten `/v1/config` for a pass. A
+  stock build sends `dev-token` when `ADCODE_AD_SERVER` is set, production
+  answers 401, and the proxy serves `SAFE_CONFIG` itself - the recorded evidence
+  run shows exactly that. The rewrite is reported as unverified instead of
+  leaving every real build inconclusive; a 200 that cannot be parsed is still a
+  failure.
+- The harness launches with `ADCODE_SETTLE_MS=0`, the development override the
+  evidence run used, so the first-install settle grace cannot swallow the
+  window.
+
 ## 0.4.0 - 2026-10-23
 
 - `blackout compat [--app PATH] [--seconds N] [--json] [--keep]` runs a build
