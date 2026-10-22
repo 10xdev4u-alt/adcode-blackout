@@ -100,16 +100,30 @@ test("a config response that fell back to safe defaults is a failure", () => {
   assert.match(config.detail, /not JSON/);
 });
 
-test("an unreachable upstream leaves the rewrite unverified rather than blaming the build", () => {
+test("an unverified rewrite does not stand between a blocking build and a pass", () => {
+  // The stock build's real behaviour: ADCODE_AD_SERVER makes it send dev-token,
+  // production answers 401, and the proxy serves SAFE_CONFIG. The block holds,
+  // so this is a pass with a warning - see docs/EVIDENCE.md.
+  const result = judge({
+    entries: [entry("serve-blocked"), entry("config-degraded", { path: "/v1/config", status: 401 })],
+    exit: stayed,
+    seconds: 60,
+  });
+  assert.equal(result.verdict, "pass");
+  const config = result.checks.find((check) => check.name === "config");
+  assert.equal(config.state, "warn");
+  assert.match(config.detail, /rewrite not verified/);
+  assert.match(config.detail, /safe config served/);
+});
+
+test("an unreachable upstream is the same warning, not a different verdict", () => {
   const result = judge({
     entries: [entry("serve-blocked"), entry("config-degraded", { path: "/v1/config", status: 0 })],
     exit: stayed,
     seconds: 60,
   });
-  assert.equal(result.verdict, "inconclusive");
-  const config = result.checks.find((check) => check.name === "config");
-  assert.equal(config.state, "warn");
-  assert.match(config.detail, /rewrite not verified/);
+  assert.equal(result.verdict, "pass");
+  assert.equal(result.checks.find((check) => check.name === "config").state, "warn");
 });
 
 test("a refused Host is a failure, not a warning", () => {

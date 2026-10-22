@@ -99,9 +99,12 @@ blackout compat --json          # the verdict as an object, for CI
 ```
 
 It starts a private proxy on an ephemeral port, launches the AppImage against
-it, and reports whether `/v1/serve` and `/v1/config` were answered and whether
-any ad-like endpoint slipped past the pack. Exit 0 is a pass, 1 is
-inconclusive (contacted, but no ad opportunity in the window), 2 is a failure.
+it, and reports whether `/v1/serve` was answered, whether a config rewrite was
+possible, and whether any ad-like endpoint slipped past the pack. Exit 0 is a
+pass, 1 is inconclusive (contacted, but no ad opportunity in the window), 2 is
+a failure. A stock build's `/v1/config` call answers 401 under `dev-token`; that
+is reported as unverified, and the block still holds through the proxy's own
+safe config.
 A run that is not a pass keeps its journal and app log and prints both paths.
 It uses no state from a real install, so it is safe to run while the normal
 blocker is up.

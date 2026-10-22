@@ -99,9 +99,15 @@ export function judge({ entries = [], requests = null, exit = { timedOut: true }
   } else if (configs > 0) {
     add("ok", "config", `${configs} rewritten`);
   } else if (unverified.length > 0) {
-    // Blocking still happens (SAFE_CONFIG), but the rewrite is unproven, so this
-    // is not a pass. Usually the upstream is simply unreachable from here.
-    add("warn", "config", `upstream answered ${unverified[0].data?.status ?? "nothing"}; rewrite not verified`);
+    /*
+     * Blocking still holds: the proxy answers SAFE_CONFIG itself, killSwitch
+     * true, dailyCap 0. And on a stock build this is the normal outcome, not a
+     * fault: with ADCODE_AD_SERVER set, ADCode stops creating a real account
+     * and sends `dev-token`, which production rejects with 401 (see
+     * docs/EVIDENCE.md). So this is reported, and it does not stand between the
+     * build and a pass - serve-blocked is the block.
+     */
+    add("warn", "config", `upstream answered ${unverified[0].data?.status ?? "nothing"}; rewrite not verified, safe config served instead`);
   } else {
     add("warn", "config", "no /v1/config in this window");
   }
@@ -119,7 +125,10 @@ export function judge({ entries = [], requests = null, exit = { timedOut: true }
 
   const failed = checks.some((check) => check.state === "fail");
   const launchFailed = Boolean(exit?.error) || (exit?.timedOut === false && exit?.code !== 0);
-  const proven = serves > 0 && configs > 0 && degraded.length === 0 && rejected.length === 0 && drift.length === 0 && !launchFailed;
+  // A pass is the ad call being answered, with nothing passing through and no
+  // refusal. Config is extra evidence, not a requirement: a stock build cannot
+  // rewrite it (401 dev-token), and the proxy's own SAFE_CONFIG already blocks.
+  const proven = serves > 0 && driftDegraded.length === 0 && rejected.length === 0 && drift.length === 0 && !launchFailed;
   const verdict = failed ? "fail" : proven ? "pass" : "inconclusive";
 
   return {
@@ -169,7 +178,15 @@ export async function runCompat({ appImage, seconds = 60, policy, rules, keep = 
       // No inherited stdio: a compat run must not fill the terminal with an
       // Electron app's logging, but the tail is kept for a failure.
       stdio: ["ignore", log, log],
-      env: { ...process.env, ADCODE_AD_SERVER: url },
+      env: {
+        ...process.env,
+        ADCODE_AD_SERVER: url,
+        // The app holds ads briefly for a new install. A 60-second window would
+        // then measure the grace period instead of the contract. This is the
+        // development override the evidence run used; normal launches keep the
+        // hold, and a build that drops the variable simply takes longer.
+        ADCODE_SETTLE_MS: "0",
+      },
     });
     closeSync(log);
 
