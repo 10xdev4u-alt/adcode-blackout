@@ -5,11 +5,12 @@
  * temporary HOME, so it exercises the same path a person does - including the
  * detached proxy that `launch` starts and the wrapper that survives it.
  */
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,23 @@ import { fileURLToPath } from "node:url";
 
 const CLI = fileURLToPath(new URL("../bin/blackout.js", import.meta.url));
 const PORT = 18793;
+const homes = [];
+
+after(() => {
+  for (const home of homes) {
+    stopProxy(home);
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/** A listener left by an interrupted run would silently answer for this one. */
+function portFree(port) {
+  return new Promise((resolve) => {
+    const server = createNetServer();
+    server.once("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
+  });
+}
 
 function run(home, args, extraEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
@@ -33,7 +51,11 @@ function run(home, args, extraEnv = {}) {
 }
 
 async function setup(port = PORT) {
+  if (!(await portFree(port))) {
+    throw new Error(`127.0.0.1:${port} is already in use; a stale proxy from an interrupted test?`);
+  }
   const home = await mkdtemp(join(tmpdir(), "blackout-cli-"));
+  homes.push(home);
   mkdirSync(join(home, "Applications"), { recursive: true });
   mkdirSync(join(home, ".config", "blackout"), { recursive: true });
   writeFileSync(
@@ -473,6 +495,7 @@ test("doctor --json is a stable object with one entry per check", async () => {
 
 test("doctor --json fails the process when a check fails", async () => {
   const home = await mkdtemp(join(tmpdir(), "blackout-cli-empty-"));
+  homes.push(home);
   const result = run(home, ["doctor", "--json"]);
   const report = JSON.parse(result.stdout);
   assert.equal(result.status, 1);
@@ -503,6 +526,7 @@ test("launch --dry-run starts nothing and prints what it would do", async () => 
 
 test("launch without an AppImage says how to point at one", async () => {
   const home = await mkdtemp(join(tmpdir(), "blackout-cli-empty-"));
+  homes.push(home);
   const result = run(home, ["launch"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /no ADCode AppImage found/);

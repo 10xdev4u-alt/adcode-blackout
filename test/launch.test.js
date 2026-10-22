@@ -1,6 +1,6 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,12 +10,18 @@ import { createProxy } from "../src/proxy.js";
 import { createJournal } from "../src/journal.js";
 import { loadRulePack } from "../src/rules.js";
 
+const dirs = [];
+after(() => {
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+});
+
 test("probe is null when nothing is listening", async () => {
   assert.equal(await probe("http://127.0.0.1:1"), null);
 });
 
 test("launchApp sets ADCODE_AD_SERVER and passes arguments through", async () => {
   const dir = await mkdtemp(join(tmpdir(), "blackout-launch-"));
+  dirs.push(dir);
   const out = join(dir, "out");
   const app = join(dir, "fake.AppImage");
   writeFileSync(app, `#!/bin/sh\nprintf '%s\\n' "$ADCODE_AD_SERVER" > '${out}'\nfor arg in "$@"; do printf '%s\\n' "$arg" >> '${out}'; done\n`);
@@ -35,6 +41,7 @@ test("launchApp reports a missing executable instead of throwing", async () => {
 
 test("ensureProxy reuses a running proxy and does not start a second", async () => {
   const dir = await mkdtemp(join(tmpdir(), "blackout-reuse-"));
+  dirs.push(dir);
   const policy = parsePolicy({ port: 0 });
   const proxy = createProxy({ policy, journal: createJournal(join(dir, "j.jsonl")), rules: loadRulePack("core") });
   await proxy.listen(0, "127.0.0.1");

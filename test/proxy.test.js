@@ -2,6 +2,7 @@ import { test, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp } from "node:fs/promises";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProxy } from "../src/proxy.js";
@@ -51,7 +52,10 @@ beforeEach(async () => {
   await proxy.listen(0, "127.0.0.1");
 });
 
-afterEach(async () => { await proxy.close(); });
+afterEach(async () => {
+  await proxy.close();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 test("serve is answered locally and never reaches the upstream", async () => {
   const before = hits.serve;

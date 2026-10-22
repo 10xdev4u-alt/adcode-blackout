@@ -1,6 +1,6 @@
-import { test, beforeEach } from "node:test";
+import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,11 @@ const APP = (name, bytes = 1_200_000) => {
 };
 
 let home;
+
+afterEach(() => {
+  if (home !== undefined) rmSync(home, { recursive: true, force: true });
+});
+
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "blackout-desktop-"));
   process.env["HOME"] = home;
