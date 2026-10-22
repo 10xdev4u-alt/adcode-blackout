@@ -102,7 +102,15 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
   const discovered = new Set();
 
   function report() {
-    return buildReport(journal.entries, { policy, version: VERSION, now: now(), enabled });
+    return buildReport(journal.entries, {
+      policy,
+      version: VERSION,
+      now: now(),
+      enabled,
+      // A journal that cannot be written is not a reason to stop blocking, but it
+      // is a reason to stop claiming the record is complete.
+      journalWriteError: journal.writeError ?? null,
+    });
   }
 
   function discover(method, path) {
@@ -272,6 +280,9 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
         upstream: policy.upstream,
         integrity: journal.integrity,
         journalHead: journal.head(),
+        // Null while the record is being written; `{ at, message }` afterwards.
+        // Blocking continues either way - see `noteWriteError` in journal.js.
+        journalWriteError: journal.writeError ?? null,
       });
       return;
     }

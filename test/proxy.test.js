@@ -2,7 +2,7 @@ import { test, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp } from "node:fs/promises";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProxy } from "../src/proxy.js";
@@ -145,6 +145,32 @@ test("setRules swaps the pack without restarting the server", async () => {
 test("the AI path is never mistaken for an ad endpoint", async () => {
   await fetch(`${proxy.url}/v1/chat`, { method: "POST", body: "{}" }).then((r) => r.text());
   assert.equal(journal.entries.filter((e) => e.kind === "endpoint-seen").length, 0);
+});
+
+test("an unwritable journal still blocks, and names the failure", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "blackout-unwritable-"));
+  const path = join(dir, "journal.jsonl");
+  const unwritable = createJournal(path);
+  mkdirSync(path); // every append now fails with EISDIR, for any user id
+
+  const degraded = createProxy({ policy: parsePolicy({ upstream: upstreamOrigin }), journal: unwritable, rules });
+  await degraded.listen(0, "127.0.0.1");
+  try {
+    // The whole point: the ad is still stopped even though the record cannot be kept.
+    const res = await fetch(`${degraded.url}/v1/serve`, { method: "POST", body: JSON.stringify({ count: 1 }) });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { creatives: [] });
+
+    const health = await (await fetch(`${degraded.url}/_blackout/health`)).json();
+    assert.match(health.journalWriteError.message, /EISDIR/);
+
+    const report = await (await fetch(`${degraded.url}/_blackout/report`)).json();
+    assert.equal(report.totals.servesBlocked, 1);
+    assert.match(report.journalWriteError.message, /EISDIR/);
+  } finally {
+    await degraded.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("pause forwards ads again, and resume blocks them again", async () => {

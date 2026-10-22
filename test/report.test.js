@@ -52,3 +52,14 @@ test("the text report names the state and the chain", () => {
   assert.match(text, /ads stopped\s+1/);
   assert.match(text, /journal chain/);
 });
+
+test("the text report says when the journal file stopped accepting writes", () => {
+  const text = formatReport(buildReport([entry("serve-blocked")], {
+    policy,
+    now: 2_000,
+    journalWriteError: { at: 1_000, message: "EISDIR: illegal operation on a directory" },
+  }));
+  assert.match(text, /journal file NOT writable/);
+  assert.match(text, /EISDIR/);
+  assert.match(text, /in memory only/);
+});

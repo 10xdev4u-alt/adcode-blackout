@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A journal that cannot be written no longer fails open. A full or read-only
+  state directory used to throw from `append`, which turned a `serve` the proxy
+  should have blocked into a `500` and let the ad through. The entry now stays in
+  memory, the request is still blocked, and the first failure is reported as
+  `journalWriteError` by `/health`, `status`, `doctor` and `report`. The gap left
+  on disk is reported by `verify` after a restart rather than papered over.
+
 ## 0.3.0 - 2026-10-23
 
 - The optional systemd unit now runs sandboxed: state directory only, no new

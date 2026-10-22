@@ -507,6 +507,7 @@ async function commandStatus(values) {
       uptimeMs: health.uptimeMs,
       totals,
       integrity,
+      journalWriteError: health.journalWriteError ?? null,
     }, null, 2));
     return 0;
   }
@@ -517,6 +518,11 @@ async function commandStatus(values) {
   if (report.ok) {
     console.log(`stopped    ${report.body.totals.servesBlocked} serves, ${report.body.totals.receiptsBlocked} receipts`);
     console.log(`chain      ${report.body.integrity.ok ? "ok" : `BROKEN at ${report.body.integrity.brokenAt}`}`);
+  }
+  // Blocking is the product, so this is a warning on a working proxy rather than
+  // a failure: ads are still stopped, but the record is in memory only.
+  if (health.journalWriteError != null) {
+    console.log(`journal    NOT WRITABLE: ${health.journalWriteError.message}`);
   }
   return 0;
 }
@@ -603,6 +609,9 @@ async function commandDoctor(values = {}) {
     const health = await probe(proxyUrl(policy));
     if (health !== null) {
       add("ok", "proxy", `running, ${health.enabled ? "blocking" : "paused"}`);
+      if (health.journalWriteError != null) {
+        add("warn", "journal-write", `${health.journalWriteError.message}; decisions are in memory only`);
+      }
     } else {
       const owner = listenerPid(policy.port);
       if (owner === null) {

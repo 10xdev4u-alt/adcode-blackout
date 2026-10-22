@@ -78,6 +78,7 @@ export function createJournal(filePath = null, { maxBytes = DEFAULT_MAX_BYTES } 
   let integrity = { ok: true, brokenAt: null };
   let prev = GENESIS;
   let seq = 0;
+  let writeError = null;
 
   if (filePath !== null) {
     const loaded = readJournalChain(filePath);
@@ -88,6 +89,20 @@ export function createJournal(filePath = null, { maxBytes = DEFAULT_MAX_BYTES } 
       seq = last.seq + 1;
       integrity = verifyChain(loaded);
     }
+  }
+
+  /**
+   * Record a write failure instead of throwing it.
+   *
+   * The journal is the audit trail; blocking is the product. A full disk or a
+   * read-only state directory must cost the record, never the decision, so the
+   * entry stays in memory and this failure is surfaced by `/health`, `status`
+   * and `report`. The resulting gap on disk is real: after a restart `verify`
+   * names it, which is the honest outcome. Pretending the chain is intact would
+   * be worse than a gap that is reported.
+   */
+  function noteWriteError(error) {
+    if (writeError === null) writeError = { at: Date.now(), message: String(error?.message ?? error) };
   }
 
   /**
@@ -108,22 +123,35 @@ export function createJournal(filePath = null, { maxBytes = DEFAULT_MAX_BYTES } 
     }
     if (size <= maxBytes) return;
 
-    const segments = segmentNames(filePath);
-    const next = segments.length === 0 ? 1 : Number(/\.(\d+)\.jsonl$/.exec(segments[segments.length - 1])[1]) + 1;
-    const target = join(dirname(filePath), `${basename(filePath).replace(/\.jsonl$/, "")}.${String(next).padStart(4, "0")}.jsonl`);
-    renameSync(filePath, target);
-    writeFileSync(filePath, "", "utf8");
+    try {
+      const segments = segmentNames(filePath);
+      const next = segments.length === 0 ? 1 : Number(/\.(\d+)\.jsonl$/.exec(segments[segments.length - 1])[1]) + 1;
+      const target = join(dirname(filePath), `${basename(filePath).replace(/\.jsonl$/, "")}.${String(next).padStart(4, "0")}.jsonl`);
+      renameSync(filePath, target);
+      writeFileSync(filePath, "", "utf8");
+    } catch (error) {
+      // A failed rotation is the same failure as a failed append: the live file
+      // keeps growing, but the next decision still gets made and still counts.
+      noteWriteError(error);
+    }
+  }
+
+  function persist(line) {
+    if (filePath === null) return;
+    try {
+      mkdirSync(dirname(filePath), { recursive: true });
+      appendFileSync(filePath, line);
+    } catch (error) {
+      noteWriteError(error);
+    }
   }
 
   function append(kind, data = {}) {
     const entry = { seq: seq++, at: Date.now(), kind, data, prev };
     entry.hash = digest(entry);
     prev = entry.hash;
-    if (filePath !== null) {
-      mkdirSync(dirname(filePath), { recursive: true });
-      appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
-    }
     entries.push(entry);
+    persist(`${JSON.stringify(entry)}\n`);
     rotateIfNeeded();
     for (const listener of listeners) {
       try {
@@ -148,6 +176,8 @@ export function createJournal(filePath = null, { maxBytes = DEFAULT_MAX_BYTES } 
     get integrity() { return integrity; },
     get path() { return filePath; },
     get segments() { return filePath === null ? [] : segmentNames(filePath); },
+    /** Null until a write fails; then `{ at, message }` for the first failure. */
+    get writeError() { return writeError; },
     head: () => prev,
   };
 }
