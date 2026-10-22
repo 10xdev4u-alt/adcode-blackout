@@ -40,6 +40,9 @@ from what was sent, a descriptor count that does not settle after the run, or a
 heap that keeps growing in the second half. RSS is printed but not judged: V8
 reserves heap and does not give it back, so warm-up growth is not a leak.
 
+Add `--segment-bytes 8000` to force rotation every few entries and verify the
+chain across dozens of segments under the same load.
+
 ## Rule changes
 
 Rules are data. Adding an endpoint is a `rules/core.json` change plus:

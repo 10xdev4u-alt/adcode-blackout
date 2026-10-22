@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `npm run soak -- --segment-bytes 8000` forces journal rotation every few
+  entries; 30 seconds at 25 req/s produced 19 segments and a chain that still
+  verifies. A `kill -9` under load left a complete chain, and the restart
+  resumed from it without losing a line.
 - `scripts/soak.js` (`npm run soak`) drives a mixed load against a proxy and
   fails on a broken chain, drifting counters, descriptors that do not settle, or
   a heap that keeps growing in the second half. `CONTRIBUTING.md` says when to
