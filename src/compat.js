@@ -171,10 +171,35 @@ export async function runCompat({ appImage, args = [], seconds = 60, policy, rul
   const proxy = createProxy({ policy: compatPolicy, journal, rules });
 
   let child = null;
+
+  /**
+   * Stop the app and everything it started.
+   *
+   * The build is Electron: killing the launcher leaves renderers and GPU
+   * helpers behind, and a harness that leaks a dozen processes per run is not
+   * one you can run in a loop. The child gets its own process group, so one
+   * signal reaches the whole tree; the fallback covers a platform where the
+   * negative pid is not available.
+   */
+  const stopTree = (signal) => {
+    if (child === null || child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      try {
+        child.kill(signal);
+      } catch {
+        /* already gone */
+      }
+    }
+  };
+
   try {
     const url = await proxy.listen(0, compatPolicy.host);
     const log = openSync(logPath, "a");
     child = spawnImpl(appImage, args, {
+      // Its own process group, so `stopTree` can end the renderers too.
+      detached: true,
       // No inherited stdio: a compat run must not fill the terminal with an
       // Electron app's logging, but the tail is kept for a failure.
       stdio: ["ignore", log, log],
@@ -204,7 +229,7 @@ export async function runCompat({ appImage, args = [], seconds = 60, policy, rul
     clearTimeout(timer);
 
     if (exit.timedOut) {
-      child.kill("SIGTERM");
+      stopTree("SIGTERM");
       const stopped = await Promise.race([
         exited,
         new Promise((resolve) => {
@@ -212,7 +237,7 @@ export async function runCompat({ appImage, args = [], seconds = 60, policy, rul
           grace.unref?.();
         }),
       ]);
-      if (stopped === null) child.kill("SIGKILL");
+      if (stopped === null) stopTree("SIGKILL");
       // Keep `timedOut: true`: the app survived the window, which is what the
       // launch check is asking about. The signal is how it was stopped, not how
       // it failed.
@@ -230,7 +255,9 @@ export async function runCompat({ appImage, args = [], seconds = 60, policy, rul
 
     return result;
   } finally {
-    if (child !== null && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    // Unconditionally: the parent may have exited on its own and left renderers
+    // behind, which is exactly the leak this is here to prevent.
+    stopTree("SIGKILL");
     await proxy.close();
     // Retained runs keep their directory for inspection; a passing run has
     // already removed it above.
