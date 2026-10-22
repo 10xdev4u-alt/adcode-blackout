@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `blackout compat` now stops the app's whole process group when the window
+  ends. Killing only the launched process left Electron's renderers and GPU
+  helpers behind on every run.
 - An explicit `--app` path is now authoritative. A path that is missing, not a
   file, or under 1 MiB used to fall through to a discovered AppImage, which
   could launch (or record, or judge) a different build than the one named. It

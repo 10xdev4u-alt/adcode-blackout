@@ -260,3 +260,38 @@ test("arguments after -- reach the app, not the harness", async () => {
   assert.equal(result.verdict, "pass");
   assert.deepEqual(readFileSync(out, "utf8").trim().split("\n"), ["--no-sandbox", "--flag"]);
 });
+
+const gone = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+test("ending the window takes the app's children with it", async () => {
+  const dir = tempDir();
+  const pidFile = join(dir, "child.pid");
+  const appImage = fakeApp(
+    `sleep 30 &\nprintf '%s\\n' "$!" > '${pidFile}'\n` +
+      'curl -s -X POST -d "{}" "$ADCODE_AD_SERVER/v1/serve" > /dev/null\n' +
+      'curl -s "$ADCODE_AD_SERVER/v1/config" > /dev/null\n' +
+      "exec sleep 30\n",
+  );
+
+  const result = await runCompat({
+    appImage,
+    seconds: 1,
+    policy: parsePolicy({ upstream: upstreamOrigin }),
+    rules,
+  });
+  assert.equal(result.verdict, "pass");
+
+  const childPid = Number(readFileSync(pidFile, "utf8").trim());
+  assert.ok(Number.isSafeInteger(childPid) && childPid > 1);
+  for (let attempt = 0; attempt < 40 && !gone(childPid); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(gone(childPid), `child ${childPid} survived the window`);
+});
