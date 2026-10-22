@@ -78,6 +78,7 @@ function upstreamHeaders(req) {
 
 export function createProxy({ policy, journal, rules, now = () => Date.now() }) {
   let enabled = policy.enabled;
+  let activeRules = rules;
   const startedAt = now();
   const discovered = new Set();
 
@@ -106,7 +107,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       return;
     }
 
-    const rule = matchRule(rules, req.method, url.pathname);
+    const rule = matchRule(activeRules, req.method, url.pathname);
     if (rule === null) {
       discover(req.method, url.pathname);
       pass(req, res, url);
@@ -313,6 +314,8 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
     get url() { return origin; },
     get enabled() { return enabled; },
     setEnabled(value) { enabled = Boolean(value); },
+    /** Swap the pack after a validated reload; matching takes effect immediately. */
+    setRules(next) { activeRules = next; },
     report,
     async listen(port = policy.port, host = policy.host) {
       await new Promise((resolve, reject) => {

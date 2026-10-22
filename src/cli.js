@@ -143,7 +143,21 @@ async function commandServe(values) {
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  process.on("SIGHUP", stop);
+
+  // SIGHUP is a reload, not a stop: an operator adding a rule should not have
+  // to drop the proxy (and every in-flight AI response) to apply it.
+  process.on("SIGHUP", () => {
+    try {
+      const next = loadRulePack(policy.rules);
+      proxy.setRules(next);
+      journal.append("rules-reloaded", { name: next.name, version: next.version, rules: next.rules.length, source: next.source });
+      console.log(`rules reloaded: ${next.name} v${next.version}, ${next.rules.length} rules from ${next.source}`);
+    } catch (error) {
+      // Keep serving the old pack. A typo must not turn the blocker off.
+      journal.append("rules-rejected", { name: policy.rules, reason: String(error.message ?? error) });
+      console.error(`rules not reloaded: ${String(error.message ?? error)}`);
+    }
+  });
 
   console.log(`blackout ${VERSION} at ${proxyUrl(policy)} -> ${policy.upstream}`);
   console.log(`rules ${policy.rules}, journal ${journalPath()}`);
@@ -372,6 +386,7 @@ async function commandRules(values) {
     return 0;
   }
   console.log(`pack       ${pack.name} v${pack.version}`);
+  console.log(`source     ${pack.source}`);
   console.log(`rules      ${pack.rules.length}`);
   for (const rule of pack.rules) {
     const match = rule.path ?? String(rule.pattern);
