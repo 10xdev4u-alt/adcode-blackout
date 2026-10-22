@@ -1,0 +1,53 @@
+{
+  "name": "core",
+  "version": 1,
+  "updated": "2026-10-22",
+  "description": "The ad surface of ADCode 2.4.0, plus a version-tolerant v2+ pair.",
+  "detect": [
+    "/v1/serve",
+    "/v1/receipts",
+    "/serve",
+    "/receipts",
+    "ADCODE_AD_SERVER",
+    "Sponsored"
+  ],
+  "rules": [
+    {
+      "id": "serve-v1",
+      "match": { "method": "POST", "path": "/v1/serve" },
+      "action": "empty-serve",
+      "note": "The inventory call. Answer empty; never forward."
+    },
+    {
+      "id": "serve-vnext",
+      "match": { "method": "POST", "pathPattern": "^/v(?:[2-9]|[1-9][0-9]+)/serve$" },
+      "action": "empty-serve",
+      "since": "2.4.0",
+      "note": "A future API version that keeps the path name."
+    },
+    {
+      "id": "receipts-v1",
+      "match": { "method": "POST", "path": "/v1/receipts" },
+      "action": "ack-receipts",
+      "note": "Acknowledge locally so the client's queue drains; nothing is claimed."
+    },
+    {
+      "id": "receipts-vnext",
+      "match": { "method": "POST", "pathPattern": "^/v(?:[2-9]|[1-9][0-9]+)/receipts$" },
+      "action": "ack-receipts",
+      "since": "2.4.0"
+    },
+    {
+      "id": "config-v1",
+      "match": { "method": "GET", "path": "/v1/config" },
+      "action": "rewrite-config",
+      "note": "Turn the server kill switch on and the daily cap to zero."
+    },
+    {
+      "id": "config-vnext",
+      "match": { "method": "GET", "pathPattern": "^/v(?:[2-9]|[1-9][0-9]+)/config$" },
+      "action": "rewrite-config",
+      "since": "2.4.0"
+    }
+  ]
+}

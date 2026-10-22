@@ -32,6 +32,7 @@ function digest(entry) {
  */
 export function createJournal(filePath = null) {
   const entries = [];
+  const listeners = new Set();
   let integrity = { ok: true, brokenAt: null };
   let prev = GENESIS;
   let seq = 0;
@@ -56,11 +57,25 @@ export function createJournal(filePath = null) {
       appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
     }
     entries.push(entry);
+    for (const listener of listeners) {
+      try {
+        listener(entry);
+      } catch {
+        // A dead subscriber must not cost the decision it was watching.
+      }
+    }
     return entry;
+  }
+
+  /** Watch new entries. Returns the unsubscribe function. */
+  function subscribe(listener) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
   }
 
   return {
     append,
+    subscribe,
     get entries() { return entries; },
     get integrity() { return integrity; },
     get path() { return filePath; },
