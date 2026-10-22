@@ -1,12 +1,20 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createJournal, GENESIS, readJournal, readJournalChain, summarize, verifyChain } from "../src/journal.js";
 
+const dirs = [];
+
+after(() => {
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+});
+
 function tempJournal() {
-  return join(mkdtempSync(join(tmpdir(), "blackout-journal-")), "journal.jsonl");
+  const path = join(mkdtempSync(join(tmpdir(), "blackout-journal-")), "journal.jsonl");
+  dirs.push(dirname(path));
+  return path;
 }
 
 test("a fresh chain starts at genesis and verifies", () => {

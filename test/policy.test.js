@@ -1,9 +1,14 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPolicy, parsePolicy, savePolicy } from "../src/policy.js";
+
+const dirs = [];
+after(() => {
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+});
 
 test("defaults are loopback, production origin, dashboard on", () => {
   const policy = parsePolicy({});
@@ -29,7 +34,9 @@ test("a bad upstream scheme is refused", () => {
 });
 
 test("a policy round-trips through disk", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "blackout-policy-")), "config.json");
+  const dir = mkdtempSync(join(tmpdir(), "blackout-policy-"));
+  dirs.push(dir);
+  const path = join(dir, "config.json");
   const saved = savePolicy({ port: 8791, estimates: { secondsPerAd: 10 } }, path);
   const loaded = loadPolicy(path);
   assert.deepEqual(loaded, saved);
