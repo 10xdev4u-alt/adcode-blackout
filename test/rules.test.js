@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadRulePack, matchRule, coveredTargets } from "../src/rules.js";
+import { loadRulePack, matchRule, coveredTargets, validatePack } from "../src/rules.js";
 
 const pack = loadRulePack("core");
 
@@ -32,10 +32,16 @@ test("coverage lists every target once", () => {
 });
 
 test("an unknown action is refused at load", () => {
-  assert.throws(() => {
-    const bad = structuredClone(pack);
-    bad.rules[0].action = "delete";
-    // validatePack runs on the raw object; re-validate through the public path
-    return import("../src/rules.js").then(({ validatePack }) => validatePack(bad));
-  });
+  const bad = { name: "x", rules: [{ id: "a", match: { method: "POST", path: "/x" }, action: "delete" }] };
+  assert.throws(() => validatePack(bad), /unknown action/);
+});
+
+test("a bad pattern is refused with the rule name", () => {
+  const bad = { name: "x", rules: [{ id: "oops", match: { method: "POST", pathPattern: "(" }, action: "block" }] };
+  assert.throws(() => validatePack(bad), /oops/);
+});
+
+test("a duplicate rule id is refused", () => {
+  const rule = { id: "same", match: { method: "POST", path: "/x" }, action: "block" };
+  assert.throws(() => validatePack({ name: "x", rules: [rule, rule] }), /duplicate/);
 });
