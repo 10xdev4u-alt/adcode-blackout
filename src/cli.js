@@ -10,7 +10,7 @@ import { existsSync, lstatSync, readFileSync, rmdirSync, unlinkSync } from "node
 import { parseArgs } from "node:util";
 import { createProxy } from "./proxy.js";
 import { createJournal, readJournalChain, verifyChain } from "./journal.js";
-import { loadPolicy, parsePolicy, ensureHome, journalPath, logPath, pidPath, policyPath, stateHome, configHome } from "./policy.js";
+import { loadPolicy, parsePolicy, savePolicy, ensureHome, journalPath, logPath, pidPath, policyPath, stateHome, configHome } from "./policy.js";
 import { loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
 import { VERSION } from "./version.js";
@@ -48,6 +48,7 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
   blackout serve [--port N] [--foreground|--detach]
       Run the proxy. Foreground by default.
 
+  blackout config [--show] [--port N] [--upstream URL] [--dashboard on|off] [--rules NAME]
   blackout rules [--json]
   blackout status [--json] | report [--json] | verify
   blackout doctor [--json]
@@ -308,6 +309,53 @@ async function commandUninstall(values) {
   console.log(`desktop    ${restored.length === 0 ? "nothing to restore" : `restored ${restored.length}`}`);
   console.log(`launcher   ${removedWrapper ? "removed" : values["keep-wrapper"] ? "kept" : "not installed"}`);
   console.log(`data       ${values.purge ? "journal, config and state removed" : "journal and config kept; --purge removes them"}`);
+  return 0;
+}
+
+function configLine(policy) {
+  return [
+    `file       ${policyPath()}`,
+    `upstream   ${policy.upstream}`,
+    `listen     ${policy.host}:${policy.port}`,
+    `dashboard  ${policy.dashboard ? "on" : "off"}`,
+    `rules      ${policy.rules}`,
+  ].join("\n");
+}
+
+/**
+ * Read or write the policy through the same validator startup uses.
+ *
+ * Writing a port does not move a running proxy; the command says so instead of
+ * pretending the change is live. A half-written config is impossible because
+ * \`parsePolicy\` runs before the file is touched.
+ */
+async function commandConfig(values) {
+  const current = readPolicy();
+  const changes = {};
+  if (values.port !== undefined) changes.port = Number(values.port);
+  if (values.upstream !== undefined) changes.upstream = values.upstream;
+  if (values.rules !== undefined) changes.rules = values.rules;
+  if (values.dashboard !== undefined) {
+    if (!["on", "off", "true", "false"].includes(values.dashboard)) {
+      return fail("--dashboard takes on or off", 2);
+    }
+    changes.dashboard = values.dashboard === "on" || values.dashboard === "true";
+  }
+
+  if (Object.keys(changes).length === 0) {
+    console.log(configLine(current));
+    return 0;
+  }
+
+  const next = savePolicy({ ...current, ...changes });
+  console.log(configLine(next));
+  if (next.port !== current.port) {
+    const running = await probe(proxyUrl(current));
+    if (running !== null) {
+      console.log("");
+      console.log(`a proxy is still listening on ${proxyUrl(current)}; restart it to move to ${proxyUrl(next)}`);
+    }
+  }
   return 0;
 }
 
@@ -613,6 +661,19 @@ export async function main(argv) {
       case "events": {
         const { values } = parseArgs({ args, options: { json: { type: "boolean" }, once: { type: "boolean" } } });
         return await commandEvents(values);
+      }
+      case "config": {
+        const { values } = parseArgs({
+          args,
+          options: {
+            show: { type: "boolean" },
+            port: { type: "string" },
+            upstream: { type: "string" },
+            dashboard: { type: "string" },
+            rules: { type: "string" },
+          },
+        });
+        return await commandConfig(values);
       }
       case "rules": {
         const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });

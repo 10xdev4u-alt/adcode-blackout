@@ -77,6 +77,7 @@ blackout report
 blackout verify
 blackout doctor
 blackout doctor --json   # one object, one entry per check
+blackout config          # show the effective policy; flags write it
 blackout rules             # the active pack, with --json for the raw object
 blackout events            # follow decisions live; --once for scripts
 ```
