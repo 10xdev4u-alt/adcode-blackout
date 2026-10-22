@@ -65,3 +65,35 @@ node scripts/smoke.js
 Then the two commands at the top of this file. Keep the app open for at least
 one scheduler tick; with the default 60-second settle, that is about two
 minutes. GPU and zygote errors in the app log are normal under `xvfb`.
+
+## The launcher path, same result
+
+The manual run above sets the variable by hand. The path a user takes is
+`blackout launch`, which starts the proxy, resolves the AppImage and sets the
+variable itself. Against a 1.2 MB wrapper script that execs the extracted
+`AppRun` (so the test exercises resolution, not just the env):
+
+```sh
+HOME=/tmp/blackout-full/home \
+BLACKOUT_HOME=/tmp/blackout-full/home/.config/blackout \
+BLACKOUT_STATE=/tmp/blackout-full/home/.local/state/blackout \
+ADCODE_SETTLE_MS=0 timeout 35 xvfb-run -a \
+  node bin/blackout.js launch --app "$APP" -- --no-sandbox
+```
+
+It printed:
+
+```
+blackout: /tmp/blackout-full/home/Applications/ADCode-test.AppImage -> http://127.0.0.1:8790
+```
+
+and the journal recorded the same two decisions:
+
+```json
+{"seq":0,"at":1792694183476,"kind":"config-degraded","data":{"path":"/v1/config","status":401},"prev":"0000000000000000000000000000000000000000000000000000000000000000","hash":"aa70408327fbb05c89694570e5e3ce1b5bcb3d6c2d30ac3c14e7b4b446b90f13"}
+{"seq":1,"at":1792694184769,"kind":"serve-blocked","data":{"path":"/v1/serve","rule":"serve-v1"},"prev":"aa70408327fbb05c89694570e5e3ce1b5bcb3d6c2d30ac3c14e7b4b446b90f13","hash":"47d4c4afd5521a7b95f6f4f5ad56b72bb7e54896cc7ba33dd26a6f11030520a7"}
+```
+
+The proxy was started detached by the launcher, and stopped by killing the pid
+it recorded; `blackout uninstall` does the same thing with an identity check
+(`docs/ARCHITECTURE.md`).
