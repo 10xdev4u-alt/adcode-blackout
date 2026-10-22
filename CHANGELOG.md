@@ -25,6 +25,9 @@
 - `blackout report` reaches its on-disk fallback again. `fetch` rejecting on a
   refused connection made the command print `fetch failed` instead of the
   journal's report, so the fallback was unreachable whenever it was needed.
+- A launcher that cannot spawn the proxy (out of descriptors, for example) now
+  warns and starts the editor. The unhandled `error` event from `spawn` threw in
+  the launcher, which cost the editor over a blocker the person could not see.
 
 ## 0.4.4 - 2026-10-23
 

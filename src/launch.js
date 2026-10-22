@@ -45,7 +45,7 @@ async function waitUntilReady(baseUrl, { fetchImpl, timeoutMs = READY_TIMEOUT_MS
  * Detached so it outlives the launcher process: the launcher exits with the
  * editor, but the proxy may keep serving a second window.
  */
-export async function ensureProxy({ policy, cli, node = process.execPath, spawnImpl = spawn, fetchImpl = fetch, autoStart = true }) {
+export async function ensureProxy({ policy, cli, node = process.execPath, spawnImpl = spawn, fetchImpl = fetch, autoStart = true, readyTimeoutMs = READY_TIMEOUT_MS }) {
   const url = proxyUrl(policy);
   const existing = await probe(url, { fetchImpl });
   if (existing !== null) return { url, started: false, health: existing };
@@ -60,9 +60,13 @@ export async function ensureProxy({ policy, cli, node = process.execPath, spawnI
     env: process.env,
   });
   closeSync(log);
+  // An unhandled 'error' on a child process is thrown at the launcher: being
+  // out of descriptors would then cost the editor, not just the blocker. The
+  // readiness wait below already turns this into a warning and a launch.
+  child.on("error", () => undefined);
   child.unref?.();
 
-  const health = await waitUntilReady(url, { fetchImpl });
+  const health = await waitUntilReady(url, { fetchImpl, timeoutMs: readyTimeoutMs });
   if (health === null) return { url, started: true, health: null, reason: "not-ready" };
   return { url, started: true, health };
 }
