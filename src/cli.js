@@ -6,11 +6,11 @@
  * already exists. No command reaches into ADCode's files.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, rmdirSync, unlinkSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { createProxy } from "./proxy.js";
 import { createJournal, readJournal, verifyChain } from "./journal.js";
-import { loadPolicy, parsePolicy, ensureHome, journalPath, logPath, stateHome } from "./policy.js";
+import { loadPolicy, parsePolicy, ensureHome, journalPath, logPath, pidPath, policyPath, stateHome, configHome } from "./policy.js";
 import { loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
 import { VERSION } from "./version.js";
@@ -26,6 +26,7 @@ import {
   installUnit,
   removeUnit,
   forgetAppImage,
+  appImageRecordPath,
   unitPath,
   unitEnabled,
   wrapperPath,
@@ -52,7 +53,7 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
   blackout --version | version
   blackout pause | resume
   blackout doctor
-  blackout uninstall [--keep-wrapper]
+  blackout uninstall [--keep-wrapper] [--purge]
 
 The AppImage is resolved on every run: explicit path, then the recorded one,
 then the newest ADCode*.AppImage in ~/Applications, ~/AppImages, ~/Downloads or
@@ -231,7 +232,39 @@ async function commandInstall(values) {
   return 0;
 }
 
+/**
+ * Delete the files blackout created, and only those.
+ *
+ * Refuses a symlink outright: `~/.local/state/blackout/journal.jsonl` pointing at
+ * something else is not a file this tool wrote, and following it would turn an
+ * uninstall into an arbitrary delete. Directories are removed only when empty.
+ */
+function purgeData() {
+  const files = [journalPath(), policyPath(), appImageRecordPath(), pidPath(), logPath()];
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    if (lstatSync(file).isSymbolicLink()) {
+      throw new Error(`refusing to delete the symlink ${file}; remove it yourself`);
+    }
+  }
+  let removed = 0;
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    unlinkSync(file);
+    removed++;
+  }
+  for (const dir of new Set([configHome(), stateHome()])) {
+    try {
+      rmdirSync(dir);
+    } catch {
+      // Not empty, which means it holds something we did not create.
+    }
+  }
+  return removed;
+}
+
 async function commandUninstall(values) {
+  if (values.purge) purgeData();
   const removedUnit = removeUnit();
   if (removedUnit) {
     systemctl(["disable", "--now", "adcode-blackout.service"]);
@@ -243,7 +276,7 @@ async function commandUninstall(values) {
   console.log(`unit       ${removedUnit ? "removed" : "not installed"}`);
   console.log(`desktop    ${restored.length === 0 ? "nothing to restore" : `restored ${restored.length}`}`);
   console.log(`launcher   ${removedWrapper ? "removed" : values["keep-wrapper"] ? "kept" : "not installed"}`);
-  console.log("data       journal and config kept; delete ~/.local/state/blackout to remove them");
+  console.log(`data       ${values.purge ? "journal, config and state removed" : "journal and config kept; --purge removes them"}`);
   return 0;
 }
 
@@ -459,7 +492,10 @@ export async function main(argv) {
         return await commandInstall(values);
       }
       case "uninstall": {
-        const { values } = parseArgs({ args, options: { "keep-wrapper": { type: "boolean" } } });
+        const { values } = parseArgs({
+          args,
+          options: { "keep-wrapper": { type: "boolean" }, purge: { type: "boolean" } },
+        });
         return await commandUninstall(values);
       }
       case "rules": {
