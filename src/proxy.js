@@ -25,6 +25,15 @@ const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "p
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const BODY_LIMIT = 2 * 1024 * 1024;
 const CONFIG_TIMEOUT_MS = 8_000;
+/**
+ * How far a client may fall behind on the decision stream.
+ *
+ * `res.write` returns false when the socket is full, and ignoring that turns a
+ * paused reader - a suspended browser tab, a `SIGSTOP`ped CLI - into a buffer
+ * that grows with every decision. Measured before this limit existed: a stalled
+ * subscriber cost about 12 MiB per 10 MiB of journal traffic, forever.
+ */
+const STREAM_LIMIT_BYTES = 256 * 1024;
 /** The client rejects an ack outside this shape, so never send one. */
 const ACKABLE = /^[A-Za-z0-9_-]{1,64}$/;
 /** Paths that look like advertising, for discovery only. */
@@ -366,15 +375,38 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       for (const entry of journal.entries.slice(-20)) {
         res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
       }
+      let timer = null;
+      let live = true;
       const unsubscribe = journal.subscribe((entry) => {
-        if (!res.writableEnded) res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
+        if (!live || res.writableEnded) return;
+        if (res.writableLength > STREAM_LIMIT_BYTES) {
+          // End the stream rather than queue for it. The client reconnects on
+          // its own (the first frame is `retry: 3000`) and is replayed the
+          // tail, so a slow reader loses nothing; a buffer that never drains
+          // would cost the whole process.
+          stop();
+          res.destroy();
+          return;
+        }
+        res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
       });
-      const timer = setInterval(() => res.write(": heartbeat\n\n"), 15_000);
-      timer.unref?.();
-      res.on("close", () => {
-        clearInterval(timer);
+      function stop() {
+        if (!live) return;
+        live = false;
         unsubscribe();
-      });
+        if (timer !== null) clearInterval(timer);
+      }
+      timer = setInterval(() => {
+        if (!live) return;
+        if (res.writableLength > STREAM_LIMIT_BYTES) {
+          stop();
+          res.destroy();
+          return;
+        }
+        res.write(": heartbeat\n\n");
+      }, 15_000);
+      timer.unref?.();
+      res.on("close", stop);
       return;
     }
 
