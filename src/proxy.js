@@ -36,6 +36,17 @@ const CONFIG_TIMEOUT_MS = 8_000;
 const STREAM_LIMIT_BYTES = 256 * 1024;
 /** The client rejects an ack outside this shape, so never send one. */
 const ACKABLE = /^[A-Za-z0-9_-]{1,64}$/;
+/**
+ * How many distinct discoveries are recorded.
+ *
+ * Discovery exists to show a person an endpoint the pack does not match, and a
+ * person reads a short list. The limit is here because nothing else bounds the
+ * inputs: any page in a browser can POST to loopback with a loopback `Host`, and
+ * each new ad-like path would otherwise cost a `Set` entry and a journal line it
+ * chooses the size of. Measured before the cap: 5,000 distinct paths, 2 KB each.
+ */
+const MAX_DISCOVERY = 256;
+
 /** Paths that look like advertising, for discovery only. */
 const AD_LIKE = /(?:^|\/)(ad|ads|advert|adverts|advertising|serve|serves|receipt|receipts|impression|impressions|sponsor|sponsors|sponsored|promo|promos|promotion|promotions|offer|offers|bid|bids|auction|auctions|campaign|campaigns|creative|creatives)(?:\/|$)/i;
 
@@ -145,6 +156,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
   let activeRules = rules;
   const startedAt = now();
   const discovered = new Set();
+  let discoveryCapped = false;
   /*
    * Application traffic, counted but not journaled.
    *
@@ -173,21 +185,28 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
     });
   }
 
+  /** Record a one-off observation, once, up to the discovery limit. */
+  function noteOnce(key, kind, data) {
+    if (discovered.has(key)) return;
+    if (discovered.size >= MAX_DISCOVERY) {
+      if (discoveryCapped) return;
+      discoveryCapped = true;
+      journal.append("discovery-capped", { kind, limit: MAX_DISCOVERY });
+      return;
+    }
+    discovered.add(key);
+    journal.append(kind, data);
+  }
+
   function discover(method, path) {
     if (!path.startsWith("/v1/") || !AD_LIKE.test(path)) return;
-    const key = `${method} ${path}`;
-    if (discovered.has(key)) return;
-    discovered.add(key);
-    journal.append("endpoint-seen", { method, path });
+    noteOnce(`${method} ${path}`, "endpoint-seen", { method, path });
   }
 
   async function handle(req, res) {
     if (!loopbackHost(req.headers.host)) {
       const key = String(req.headers.host ?? "");
-      if (!discovered.has(`host ${key}`)) {
-        discovered.add(`host ${key}`);
-        journal.append("host-rejected", { host: key });
-      }
+      noteOnce(`host ${key}`, "host-rejected", { host: key });
       sendJson(res, 421, { error: "host-not-loopback" });
       return;
     }
