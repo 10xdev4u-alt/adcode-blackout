@@ -3,6 +3,26 @@
 `rules/core.json` is the shipped pack. A pack is data, so a new endpoint is a
 reviewable JSON change rather than a code change.
 
+A user pack at `~/.config/blackout/rules/<name>.json` overrides the bundled pack
+of the same name. It is loaded by the same validator, and `blackout rules` prints
+which file is in force:
+
+```
+pack       core v1
+source     /home/you/.config/blackout/rules/core.json
+```
+
+Reload it without restarting the proxy:
+
+```sh
+kill -HUP "$(cat ~/.local/state/blackout/blackout.pid)"
+```
+
+A valid pack is applied immediately and journaled as `rules-reloaded`. An invalid
+one is journaled as `rules-rejected` and the previous pack stays active, because a
+typo must not be a way to switch the blocker off. No restart means no dropped AI
+stream and no lost terminal session just to answer a new path.
+
 ```json
 {
   "name": "core",
@@ -56,7 +76,11 @@ the error, not silently skipped.
 1. Run `blackout` with the new build and look at `blackout report`; a new
    ad-like path appears under "endpoints seen outside the rules" and in the
    journal as `endpoint-seen`.
-2. Add a rule with the narrowest match that covers it - an exact path if it is
-   stable, a version-tolerant pattern if only the version moves.
-3. Add a case to `test/rules.test.js` and a proxy test for the response shape.
-4. `blackout verify` and a launch on the stock AppImage before merging.
+2. Copy the bundled pack to `~/.config/blackout/rules/core.json`, add a rule
+   with the narrowest match that covers it - an exact path if it is stable, a
+   version-tolerant pattern if only the version moves.
+3. `kill -HUP` the proxy and confirm with `blackout events` that the new path is
+   answered.
+4. If it belongs in the project, add a case to `test/rules.test.js` and a proxy
+   test for the response shape, then `blackout verify` and a launch on the stock
+   AppImage before merging.

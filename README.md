@@ -29,6 +29,9 @@ and **three response bodies**, both of which survive a version bump:
 - Rules match paths, not builds. `/v1/serve` and its future-version pattern
   `^/v(?:[2-9]|[1-9][0-9]+)/serve$` are in `rules/core.json`; a new API version
   that keeps the path name is answered without a code change.
+- A pack at `~/.config/blackout/rules/core.json` overrides the bundled one, and
+  `SIGHUP` applies it live. A new endpoint is a file edit and a signal, not a
+  restart or a release; a bad edit is journaled and the old pack stays active.
 - No AppImage is extracted, repacked or modified. `uninstall` removes the
   launcher and restores any `.desktop` file it touched.
 

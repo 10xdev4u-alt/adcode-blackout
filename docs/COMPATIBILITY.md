@@ -69,10 +69,20 @@ validation failure - and a new response shape is a small, testable change.
    grep endpoint-seen ~/.local/state/blackout/journal.jsonl
    ```
 
-2. Add a rule to `rules/core.json`, with a test in `test/rules.test.js` and a
-   proxy test for the response.
-3. `npm test && node scripts/smoke.js`.
+2. Copy the pack to `~/.config/blackout/rules/core.json`, add the narrowest rule
+   that covers the endpoint, and reload:
+
+   ```sh
+   kill -HUP "$(cat ~/.local/state/blackout/blackout.pid)"
+   blackout events --once
+   ```
+
+   A valid pack applies immediately; an invalid one is journaled as
+   `rules-rejected` and the old pack keeps running.
+
+3. If it belongs in the project, add a test in `test/rules.test.js` and a proxy
+   test for the response, then `npm test && node scripts/smoke.js`.
 4. Launch the stock AppImage and confirm `servesBlocked` moves.
 
 The rule file is data on purpose: this is a reviewable JSON change, not a
-release of a patched binary.
+release of a patched binary, and SIGHUP means it does not even need a restart.
