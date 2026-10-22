@@ -125,6 +125,13 @@ export function judge({ entries = [], requests = null, exit = { timedOut: true }
 
   const failed = checks.some((check) => check.state === "fail");
   const launchFailed = Boolean(exit?.error) || (exit?.timedOut === false && exit?.code !== 0);
+  // A build that quits cleanly in under a second without a single request is
+  // almost always a second instance handing focus to the first one, whose
+  // ADCODE_AD_SERVER points somewhere else. Say so, because "never called the
+  // proxy" reads as a broken build when the answer is "close your editor".
+  const note = exit?.timedOut === false && exit?.code === 0 && (requests ?? 0) === 0 && entries.length === 0
+    ? "It exited immediately without a single request. If ADCode is already open, close it and run again: a second instance usually focuses the first and exits."
+    : null;
   // A pass is the ad call being answered, with nothing passing through and no
   // refusal. Config is extra evidence, not a requirement: a stock build cannot
   // rewrite it (401 dev-token), and the proxy's own SAFE_CONFIG already blocks.
@@ -137,6 +144,7 @@ export function judge({ entries = [], requests = null, exit = { timedOut: true }
     verdict,
     appImage,
     seconds,
+    note,
     checks,
     observed: {
       requests,
@@ -289,6 +297,10 @@ export function formatCompat(result) {
     lines.push("");
     lines.push("Not proven either way: open the editor, keep it focused, and run again");
     lines.push("with a longer --seconds. Blocking is not confirmed until a /v1/serve is seen.");
+  }
+  if (result.note != null) {
+    lines.push("");
+    lines.push(result.note);
   }
   if (result.verdict === "fail") {
     const first = result.checks.find((check) => check.state === "fail");

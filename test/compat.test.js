@@ -312,3 +312,13 @@ test("each failure carries the next step, not just a verdict", () => {
   const launch = formatCompat(judge({ entries: [], exit: { timedOut: false, code: 7 }, seconds: 60 }));
   assert.match(launch, /-- --no-sandbox/);
 });
+
+test("a clean exit with no traffic is explained as a second instance, not a broken build", () => {
+  const result = judge({ entries: [], requests: 0, exit: { timedOut: false, code: 0 }, seconds: 60 });
+  assert.equal(result.verdict, "fail");
+  assert.match(result.note, /already open/);
+  assert.match(formatCompat(result), /close it and run again/);
+
+  // A build that stays up and says nothing gets no such excuse.
+  assert.equal(judge({ entries: [], requests: 0, exit: stayed, seconds: 60 }).note, null);
+});

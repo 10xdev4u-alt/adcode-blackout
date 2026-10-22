@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `blackout compat` explains a build that quits immediately with no traffic:
+  a second instance of ADCode focuses the first one and exits, so the answer is
+  "close the editor", not "the build is broken".
 - `blackout compat` prints the next step with a failure, not only the check
   that failed: what to read, which flag to try, or whether the answer is a rule
   or a bug report. `docs/COMPATIBILITY.md` has the same table.
