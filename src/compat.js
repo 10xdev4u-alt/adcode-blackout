@@ -158,7 +158,7 @@ export function judge({ entries = [], requests = null, exit = { timedOut: true }
  * so a compat run cannot disturb a real install - and it is safe to run while
  * the normal blocker is up.
  */
-export async function runCompat({ appImage, seconds = 60, policy, rules, keep = false, spawnImpl = spawn }) {
+export async function runCompat({ appImage, args = [], seconds = 60, policy, rules, keep = false, spawnImpl = spawn }) {
   if (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > 3_600) {
     throw new TypeError("seconds must be an integer between 1 and 3600");
   }
@@ -174,7 +174,7 @@ export async function runCompat({ appImage, seconds = 60, policy, rules, keep = 
   try {
     const url = await proxy.listen(0, compatPolicy.host);
     const log = openSync(logPath, "a");
-    child = spawnImpl(appImage, [], {
+    child = spawnImpl(appImage, args, {
       // No inherited stdio: a compat run must not fill the terminal with an
       // Electron app's logging, but the tail is kept for a failure.
       stdio: ["ignore", log, log],

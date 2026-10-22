@@ -1,7 +1,7 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { formatCompat, judge, runCompat } from "../src/compat.js";
@@ -237,4 +237,26 @@ test("a build that only makes pass-through calls is judged inconclusive by the r
   assert.ok(result.observed.requests > 0);
   assert.equal(result.observed.serves, 0);
   discardRetained(result);
+});
+
+test("arguments after -- reach the app, not the harness", async () => {
+  const dir = tempDir();
+  const out = join(dir, "args.txt");
+  const appImage = fakeApp(
+    `printf '%s\\n' "$@" > '${out}'\n` +
+      'curl -s -X POST -d "{}" "$ADCODE_AD_SERVER/v1/serve" > /dev/null\n' +
+      'curl -s "$ADCODE_AD_SERVER/v1/config" > /dev/null\n' +
+      "exec sleep 30\n",
+  );
+
+  const result = await runCompat({
+    appImage,
+    args: ["--no-sandbox", "--flag"],
+    seconds: 1,
+    policy: parsePolicy({ upstream: upstreamOrigin }),
+    rules,
+  });
+
+  assert.equal(result.verdict, "pass");
+  assert.deepEqual(readFileSync(out, "utf8").trim().split("\n"), ["--no-sandbox", "--flag"]);
 });
