@@ -117,6 +117,10 @@ function drain(req, { timeoutMs = 2_000 } = {}) {
 }
 
 function sendJson(res, status, body, extra = {}) {
+  // The client can be gone by the time an answer is ready - it aborted during a
+  // drain, or while the upstream was being fetched. Writing to that response is
+  // at best wasted and at worst an error event nothing is listening for.
+  if (res.destroyed || res.writableEnded) return;
   const text = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -301,9 +305,10 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       return;
     }
     const request = target.protocol === "https:" ? httpsRequest : httpRequest;
+    const controller = new AbortController();
     // No shared agent: a pooled socket would outlive the request and make shutdown
     // wait on a connection nobody is using.
-    const upstream = request(target, { method: req.method, headers: upstreamHeaders(req), agent: false }, (response) => {
+    const upstream = request(target, { method: req.method, headers: upstreamHeaders(req), agent: false, signal: controller.signal }, (response) => {
       if (res.destroyed) {
         response.destroy();
         return;
@@ -318,12 +323,32 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
     });
 
     upstream.on("error", (error) => {
-      journal.append("upstream-error", { path: url.pathname, reason: String(error?.message ?? error) });
+      // An abort we caused is not an upstream fault, and journaling it would
+      // turn every cancelled request into an entry the report cannot explain.
+      if (!controller.signal.aborted) {
+        journal.append("upstream-error", { path: url.pathname, reason: String(error?.message ?? error) });
+      }
       if (!res.headersSent) sendJson(res, 502, { error: "upstream-unreachable" });
-      else res.destroy();
+      else if (!res.destroyed) res.destroy();
     });
 
-    req.on("aborted", () => upstream.destroy());
+    /*
+     * The client hanging up must close the upstream side.
+     *
+     * `req.pipe(upstream)` alone does not do this: when the socket goes away the
+     * request is destroyed, but the outgoing request keeps its socket open. A
+     * stalled upstream then holds one descriptor and one request object per
+     * abandoned call, and never errors, so nothing else cleans it up. Measured
+     * before this: 40 cancelled calls, 40 upstream sockets still open.
+     */
+    res.on("close", () => {
+      // A finished response also closes the connection; only an unfinished one
+      // means the client gave up before it had its answer.
+      if (res.writableFinished) return;
+      req.unpipe(upstream);
+      controller.abort();
+      upstream.destroy();
+    });
     req.pipe(upstream);
   }
 

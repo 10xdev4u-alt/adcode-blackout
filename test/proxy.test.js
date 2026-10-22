@@ -333,6 +333,53 @@ test("an unreachable upstream is a 502 with a journal entry", async () => {
   await new Promise((resolve) => upstream.listen(Number(new URL(upstreamOrigin).port), "127.0.0.1", resolve));
 });
 
+test("a client that gives up before the answer closes the upstream request", async () => {
+  // A stalled upstream never errors, so nothing else cleans this up: without an
+  // explicit teardown each cancelled call leaks one descriptor and one request.
+  let opened = 0;
+  let closed = 0;
+  const stalled = createServer((req) => {
+    opened += 1;
+    req.socket.on("close", () => { closed += 1; });
+  });
+  await new Promise((resolve) => stalled.listen(0, "127.0.0.1", resolve));
+  const stalledProxy = createProxy({
+    policy: parsePolicy({ upstream: `http://127.0.0.1:${stalled.address().port}` }),
+    journal: createJournal(null),
+    rules,
+  });
+  await stalledProxy.listen(0, "127.0.0.1");
+  try {
+    const socket = connect(Number(new URL(stalledProxy.url).port), "127.0.0.1");
+    socket.on("error", () => {});
+    socket.write("GET /v1/balance HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    socket.destroy();
+    for (let i = 0; i < 100 && closed === 0; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(opened, 1);
+    assert.equal(closed, 1, "the upstream socket should close with the client");
+  } finally {
+    await stalledProxy.close();
+    stalled.closeAllConnections?.();
+    await new Promise((resolve) => stalled.close(resolve));
+  }
+});
+
+test("a client that aborts a blocked request mid-body does not disturb the proxy", async () => {
+  const socket = connect(Number(new URL(proxy.url).port), "127.0.0.1");
+  socket.on("error", () => {});
+  // An announced body that never arrives: the drain finishes on the abort, and
+  // the answer it then tries to send has nowhere to go.
+  socket.write("POST /v1/serve HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-length: 1048576\r\n\r\nxxxxx");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  socket.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  const res = await fetch(`${proxy.url}/v1/serve`, { method: "POST", body: "{}" });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { creatives: [] });
+});
+
 test("a body over the limit is refused rather than buffered", async () => {
   const res = await fetch(`${proxy.url}/v1/receipts`, { method: "POST", body: "x".repeat(2 * 1024 * 1024 + 1) });
   assert.equal(res.status, 413);
