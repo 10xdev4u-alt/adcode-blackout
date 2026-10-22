@@ -23,6 +23,13 @@ one is journaled as `rules-rejected` and the previous pack stays active, because
 typo must not be a way to switch the blocker off. No restart means no dropped AI
 stream and no lost terminal session just to answer a new path.
 
+The same rule applies at startup. If `core`'s override is malformed when the
+proxy starts, blackout journals `rules-rejected` with `fallback`, uses the
+bundled `core` pack and keeps blocking; `doctor` reports the broken file. A
+custom pack name with no bundled fallback is a configuration error and refuses
+to start, because guessing which rules the user meant would be worse than
+saying so.
+
 ```json
 {
   "name": "core",

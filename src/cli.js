@@ -11,7 +11,7 @@ import { parseArgs } from "node:util";
 import { createProxy } from "./proxy.js";
 import { createJournal, readJournalChain, verifyChain } from "./journal.js";
 import { loadPolicy, parsePolicy, savePolicy, ensureHome, journalPath, logPath, pidPath, policyPath, stateHome, configHome } from "./policy.js";
-import { loadRulePack } from "./rules.js";
+import { bundledRulePath, loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
 import { VERSION } from "./version.js";
 import { probe, proxyUrl, ensureProxy, launchApp, writePid, removePid } from "./launch.js";
@@ -99,7 +99,24 @@ async function commandServe(values) {
   ensureHome();
 
   const journal = createJournal(journalPath());
-  const rules = loadRulePack(policy.rules);
+  let rules;
+  try {
+    rules = loadRulePack(policy.rules);
+  } catch (error) {
+    // The user override is broken. For `core` there is a known-good pack to
+    // fall back to, and blocking is the whole point - so a typo must not turn
+    // the blocker off at startup. A custom pack has no such fallback and is a
+    // configuration error worth stopping for.
+    if (policy.rules !== "core") throw error;
+    rules = loadRulePack("core", bundledRulePath("core"));
+    journal.append("rules-rejected", {
+      name: "core",
+      reason: String(error.message ?? error),
+      fallback: bundledRulePath("core"),
+    });
+    console.error(`blackout: ${String(error.message ?? error)}`);
+    console.error("blackout: using the bundled core pack; fix the override and send SIGHUP");
+  }
   const proxy = createProxy({ policy, journal, rules });
 
   if (values.detach) {
@@ -593,6 +610,15 @@ async function commandDoctor(values = {}) {
       } else {
         add("fail", "proxy", `${proxyUrl(policy)} is held by ${describePid(owner)}`);
       }
+    }
+  }
+
+  if (policy !== undefined) {
+    try {
+      const pack = loadRulePack(policy.rules);
+      add("ok", "rules", `${pack.name} v${pack.version}, ${pack.rules.length} rules from ${pack.source}`);
+    } catch (error) {
+      add("fail", "rules", String(error.message ?? error));
     }
   }
 

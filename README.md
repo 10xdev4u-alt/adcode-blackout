@@ -97,8 +97,8 @@ exact argv, and starts nothing.
 `report` counts blocked serves and receipts, the minutes of attention that
 bought back, and - honestly labelled as an estimate - the earnings you chose not
 to take. `verify` recomputes the hash chain and names the first entry that no
-longer matches. `doctor` checks node, config, AppImage resolution, the launcher,
-the proxy, systemd, the journal and the upstream.
+longer matches. `doctor` checks node, config, the active rule pack, AppImage
+resolution, the launcher, the proxy, systemd, the journal and the upstream.
 
 A local dashboard is at <http://127.0.0.1:8790/_blackout/dashboard> while the
 proxy runs. It loads no external assets and has no build step.
@@ -143,6 +143,9 @@ cannot hit it with a form post.
 - Journal grows: the live file rotates at 5 MiB into numbered segments, and
   `verify` checks across them. Each file is bounded; the total is not, because
   deleting history would defeat the point. Plan on a few segments per year.
+- A broken `core` override at startup: the bundled pack is used instead, and
+  `rules-rejected` says why. A broken custom pack refuses to start rather than
+  guessing.
 - Port 8790 busy: `launch` warns and starts ADCode unprotected rather than
   refusing to start it. `doctor` names the pid and command that hold the port
   on Linux, and says "not running" where it cannot know.
