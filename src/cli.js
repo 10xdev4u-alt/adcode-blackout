@@ -99,16 +99,28 @@ function readPolicy() {
   }
 }
 
+/**
+ * One local HTTP call, with a failure shape instead of a throw.
+ *
+ * `fetch` rejecting on a refused connection made "the proxy is not running"
+ * indistinguishable from a bug: `report` never reached the on-disk fallback it
+ * implements, and the user saw "fetch failed". The caller that wants to say why
+ * now gets `ok: false` and an error it can name.
+ */
 async function request(url, options = {}) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(3_000) });
-  const text = await response.text();
-  let body = null;
   try {
-    body = text === "" ? null : JSON.parse(text);
-  } catch {
-    body = text;
+    const response = await fetch(url, { ...options, signal: AbortSignal.timeout(3_000) });
+    const text = await response.text();
+    let body = null;
+    try {
+      body = text === "" ? null : JSON.parse(text);
+    } catch {
+      body = text;
+    }
+    return { status: response.status, ok: response.ok, body };
+  } catch (error) {
+    return { status: 0, ok: false, body: null, error: String(error?.message ?? error) };
   }
-  return { status: response.status, ok: response.ok, body };
 }
 
 function journalOrEmpty() {

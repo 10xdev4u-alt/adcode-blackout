@@ -19,6 +19,12 @@
   stops (`discovery-capped`). Any page can POST to loopback, and every new
   ad-like path would otherwise cost a set entry and a journal line that the
   request chooses the size of.
+- A config response over 1 MiB is refused without reading the rest. The rewrite
+  used to buffer whatever the upstream sent before failing to parse it: a 200
+  MiB body drove peak RSS to 723 MiB, and 87 MiB after the limit.
+- `blackout report` reaches its on-disk fallback again. `fetch` rejecting on a
+  refused connection made the command print `fetch failed` instead of the
+  journal's report, so the fallback was unreachable whenever it was needed.
 
 ## 0.4.4 - 2026-10-23
 
