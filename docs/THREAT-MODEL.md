@@ -51,7 +51,13 @@ or write it to disk.
 browser cannot set a custom header cross-origin without a CORS preflight, and
 the proxy answers no CORS preflight. That blocks the trivial
 `<form action="http://127.0.0.1:8790/_blackout/pause">` attack from a web page.
-It does not stop a local process, which is out of scope.
+
+It also requires the `Host` header to name loopback (`127.0.0.1`, `::1`,
+`localhost`). Without that, DNS rebinding would defeat the control header: a
+page on `evil.example` whose hostname resolves to 127.0.0.1 is same-origin with
+the proxy as far as the browser is concerned, so its custom header needs no
+preflight. A non-loopback Host is answered `421` and journaled once per distinct
+value. This does not stop a local process, which is out of scope.
 
 `/dashboard` sends `Content-Security-Policy: default-src 'none'` with inline
 style and script only, and loads nothing remote.

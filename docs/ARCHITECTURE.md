@@ -108,3 +108,7 @@ All under `/_blackout/`, never forwarded:
 
 The proxy binds loopback only. `policy.js` refuses any other host rather than
 clamping it, because a typo in a host is how a local tool becomes a public one.
+Every request must also name loopback in `Host`; anything else is `421` and a
+single `host-rejected` entry per distinct name. Binding alone is not enough
+against DNS rebinding, where the browser's host is the attacker's and the socket
+is loopback.
