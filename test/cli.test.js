@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
@@ -61,6 +61,33 @@ function stopProxy(home) {
   } catch {
     /* already gone */
   }
+}
+
+function runAsync(home, args) {
+  const child = spawn(process.execPath, [CLI, ...args], {
+    env: {
+      ...process.env,
+      HOME: home,
+      BLACKOUT_HOME: join(home, ".config", "blackout"),
+      BLACKOUT_STATE: join(home, ".local", "state", "blackout"),
+    },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => (stdout += chunk));
+  child.stderr.on("data", (chunk) => (stderr += chunk));
+  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal, stdout, stderr })));
+  return { child, exited };
+}
+
+function withTimeout(promise, ms, child) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve({ code: null, signal: "timeout" });
+    }, ms)),
+  ]);
 }
 
 async function waitFor(check, timeoutMs = 5_000) {
@@ -181,6 +208,26 @@ test("doctor warns when the launcher points at another checkout", async () => {
   const result = run(home, ["doctor"]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /warn\s+launcher\s+.*points at \/old\/checkout/);
+});
+
+test("events follows a decision, and --once exits after it", async () => {
+  const { home } = await setup(18805);
+  const started = run(home, ["serve", "--detach"]);
+  assert.equal(started.status, 0, started.stderr);
+  try {
+    const { child, exited } = runAsync(home, ["events", "--once", "--json"]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await fetch("http://127.0.0.1:18805/v1/serve", { method: "POST", body: "{}" });
+
+    const result = await withTimeout(exited, 5_000, child);
+    assert.equal(result.code, 0, result.stderr);
+    const entry = JSON.parse(result.stdout.trim().split("\n").at(-1));
+    assert.equal(entry.kind, "serve-blocked");
+    assert.equal(entry.data.path, "/v1/serve");
+    assert.equal(entry.data.rule, "serve-v1");
+  } finally {
+    stopProxy(home);
+  }
 });
 
 test("uninstall stops the proxy it started", async () => {
