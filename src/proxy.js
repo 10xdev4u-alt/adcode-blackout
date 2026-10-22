@@ -151,7 +151,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       }
 
       case "rewrite-config": {
-        const upstream = await fetchUpstream(url.pathname);
+        const upstream = await fetchUpstream(url.pathname, req);
         if (!upstream.ok) {
           journal.append("config-degraded", { path: url.pathname, status: upstream.status });
           sendJson(res, 200, SAFE_CONFIG, { "x-blackout": "config-safe" });
@@ -179,10 +179,13 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
     }
   }
 
-  async function fetchUpstream(path) {
+  async function fetchUpstream(path, req) {
     try {
       const response = await fetch(`${policy.upstream}${path}`, {
-        headers: { accept: "application/json" },
+        // The config call is authenticated like every other call. Dropping the
+        // header turned a normal 200 into a 401 and made the rewrite look like a
+        // degraded fallback every time.
+        headers: { ...upstreamHeaders(req), accept: "application/json" },
         signal: AbortSignal.timeout(CONFIG_TIMEOUT_MS),
       });
       return { ok: response.ok, status: response.status, text: await response.text() };

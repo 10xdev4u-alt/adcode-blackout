@@ -13,6 +13,7 @@ const rules = loadRulePack("core");
 let upstream;
 let upstreamOrigin;
 let hits;
+let seenConfigAuth = null;
 
 before(async () => {
   hits = { serve: 0, receipts: 0, config: 0, balance: 0, other: 0 };
@@ -22,7 +23,7 @@ before(async () => {
     req.on("end", () => {
       if (req.url === "/v1/serve") { hits.serve++; res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ creatives: [] })); return; }
       if (req.url === "/v1/receipts") { hits.receipts++; res.writeHead(200); res.end("{}"); return; }
-      if (req.url === "/v1/config") { hits.config++; res.writeHead(200); res.end(JSON.stringify({ killSwitch: false, caps: { dailyCap: 40, minIntervalMs: 1000 }, projections: { off: "0", light: "10", standard: "20", max: "30" }, extra: "ignored" })); return; }
+      if (req.url === "/v1/config") { hits.config++; seenConfigAuth = req.headers.authorization ?? null; res.writeHead(200); res.end(JSON.stringify({ killSwitch: false, caps: { dailyCap: 40, minIntervalMs: 1000 }, projections: { off: "0", light: "10", standard: "20", max: "30" }, extra: "ignored" })); return; }
       if (req.url === "/v1/balance") { hits.balance++; res.writeHead(200, { "content-type": "application/json", "x-upstream": "yes" }); res.end(JSON.stringify({ availableMicros: "1080000", lifetimeMicros: "5400000" })); return; }
       hits.other++;
       res.writeHead(200, { "content-type": "application/json" });
@@ -83,7 +84,7 @@ test("malformed receipts body is a 400, not a crash", async () => {
 });
 
 test("config is rewritten off, with only the keys the client validates", async () => {
-  const res = await fetch(`${proxy.url}/v1/config`);
+  const res = await fetch(`${proxy.url}/v1/config`, { headers: { authorization: "Bearer test-token" } });
   const body = await res.json();
   assert.equal(body.killSwitch, true);
   assert.deepEqual(body.caps, { minIntervalMs: 1000, dailyCap: 0 });
@@ -92,6 +93,7 @@ test("config is rewritten off, with only the keys the client validates", async (
   assert.deepEqual(body.projections, { off: "0", light: "10", standard: "20", max: "30" });
   assert.deepEqual(Object.keys(body).sort(), ["caps", "killSwitch", "projections"]);
   assert.equal(body.extra, undefined);
+  assert.equal(seenConfigAuth, "Bearer test-token");
 });
 
 test("balance passes through byte for byte and keeps upstream headers", async () => {
