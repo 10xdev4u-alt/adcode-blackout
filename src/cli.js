@@ -15,6 +15,7 @@ import { loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
 import { VERSION } from "./version.js";
 import { probe, proxyUrl, ensureProxy, launchApp, writePid, removePid } from "./launch.js";
+import { describePid, listenerPid } from "./netinfo.js";
 import {
   installWrapper,
   removeWrapper,
@@ -380,7 +381,16 @@ async function commandDoctor() {
 
   if (policy !== undefined) {
     const health = await probe(proxyUrl(policy));
-    add(health === null ? "warn" : "ok", "proxy", health === null ? `not running at ${proxyUrl(policy)}` : `running, ${health.enabled ? "blocking" : "paused"}`);
+    if (health !== null) {
+      add("ok", "proxy", `running, ${health.enabled ? "blocking" : "paused"}`);
+    } else {
+      const owner = listenerPid(policy.port);
+      if (owner === null) {
+        add("warn", "proxy", `not running at ${proxyUrl(policy)}`);
+      } else {
+        add("fail", "proxy", `${proxyUrl(policy)} is held by ${describePid(owner)}`);
+      }
+    }
   }
 
   add(existsSync(unitPath()) ? "ok" : "warn", "systemd", existsSync(unitPath()) ? `${unitPath()}${unitEnabled() ? ", enabled" : ", not enabled"}` : "no user unit; the launcher starts the proxy on demand");

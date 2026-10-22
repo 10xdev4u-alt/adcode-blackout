@@ -134,7 +134,8 @@ cannot hit it with a form post.
   detector, not a preventer - anyone with write access can rewrite the whole
   file, but not keep the head hash you already published.
 - Port 8790 busy: `launch` warns and starts ADCode unprotected rather than
-  refusing to start it. `doctor` says which process owns the port.
+  refusing to start it. `doctor` names the pid and command that hold the port
+  on Linux, and says "not running" where it cannot know.
 - AppImage renamed by an update: the next launch resolves the newest match.
   Set `ADCODE_APPIMAGE` to pin one deliberately.
 
