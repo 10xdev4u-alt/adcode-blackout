@@ -1,0 +1,21 @@
+{
+  "name": "adcode-blackout",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Path-scoped ad blocker for ADCode. No cards, no receipts, no ad traffic.",
+  "bin": { "blackout": "./bin/blackout.js" },
+  "scripts": {
+    "test": "node --test",
+    "start": "node bin/blackout.js serve",
+    "smoke": "node scripts/smoke.js"
+  },
+  "engines": { "node": ">=20" },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/10xdev4u-alt/adcode-blackout.git"
+  },
+  "keywords": ["adblock", "adcode", "electron", "privacy", "appimage", "linux"],
+  "author": "10xdev4u-alt"
+}

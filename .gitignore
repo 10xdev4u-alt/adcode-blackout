@@ -1,0 +1,7 @@
+node_modules/
+.blackout/
+dist/
+*.log
+*.tgz
+*.zip
+.DS_Store
