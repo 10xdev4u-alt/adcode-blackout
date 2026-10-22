@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -144,6 +145,19 @@ test("install, launch, pause, report, verify, uninstall", async () => {
   const removed = run(home, ["uninstall"]);
   assert.equal(removed.status, 0, removed.stderr);
   assert.equal(existsSync(join(home, ".local", "bin", "adcode")), false);
+});
+
+test("doctor names the process holding the proxy port", { skip: process.platform !== "linux" }, async () => {
+  const { home } = await setup(18799);
+  const blocker = createServer();
+  await new Promise((resolve) => blocker.listen(18799, "127.0.0.1", resolve));
+  try {
+    const result = run(home, ["doctor"], { BLACKOUT_STATE: join(home, ".local", "state", "blackout") });
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /FAIL\s+proxy\s+.*is held by pid \d+/);
+  } finally {
+    await new Promise((resolve) => blocker.close(resolve));
+  }
 });
 
 test("rules prints the active pack, and --json prints it whole", async () => {
