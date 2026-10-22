@@ -97,6 +97,14 @@ export function findAppImages({ home = homedir(), extraDirs = [] } = {}) {
  * first question in every bug report about a launcher.
  */
 export function resolveAppImage({ explicit = null, home = homedir(), env = process.env, extraDirs = [] } = {}) {
+  // An explicit path is authoritative. Falling back to a discovered AppImage
+  // after a typo would launch a different build than the one that was asked for
+  // - for an `install` that records it, or a `compat` that judges it, silently
+  // choosing another file is worse than refusing.
+  if (explicit !== null && !looksLikeAppImage(explicit)) {
+    return { path: null, reason: "explicit-rejected", found: false, rejected: explicit };
+  }
+
   const candidates = [];
   if (explicit !== null) candidates.push({ path: explicit, reason: "explicit" });
 
@@ -123,11 +131,7 @@ export function resolveAppImage({ explicit = null, home = homedir(), env = proce
   if (discovered.length > 0) {
     return { path: discovered[0].path, reason: "newest", found: true, alternatives: discovered.map((one) => one.path) };
   }
-  // A path the caller named but could not use is worth naming back. "No AppImage
-  // found" after `--app ./ADCode.AppImage` sends people looking in the wrong
-  // place, when the answer is that the path is missing or far too small.
-  const rejected = explicit !== null && !looksLikeAppImage(explicit) ? explicit : null;
-  return { path: null, reason: "none", found: false, rejected };
+  return { path: null, reason: "none", found: false };
 }
 
 export function recordAppImage(path, home = homedir()) {

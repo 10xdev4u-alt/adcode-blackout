@@ -68,6 +68,7 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
 The AppImage is resolved on every run: explicit path, then the recorded one,
 then the newest ADCode*.AppImage in ~/Applications, ~/AppImages, ~/Downloads or
 ~/.local/bin. An update that renames the file is picked up without reinstalling.
+An --app path that cannot be used is an error, never a hint to look elsewhere.
 `;
 
 function fail(message, code = 1) {

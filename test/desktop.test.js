@@ -173,11 +173,16 @@ test("renderWrapper survives a path containing a single quote", () => {
   assert.match(wrapper, /'\/tmp\/a'\\''b\/blackout\.js'/);
 });
 
-test("an explicit path that cannot be used is named back", () => {
+test("an explicit path that cannot be used is named back, and is not second-guessed", () => {
+  const usable = APP("ADCode-2.5.0.AppImage");
   const tiny = join(home, "Applications", "ADCode-small.AppImage");
   writeFileSync(tiny, "not really");
   const resolved = resolveAppImage({ home, env: {}, explicit: tiny });
   assert.equal(resolved.found, false);
   assert.equal(resolved.rejected, tiny);
-  assert.equal(resolveAppImage({ home, env: {} }).rejected, null);
+  assert.equal(resolved.reason, "explicit-rejected");
+  // There is a usable AppImage in this home; refusing is still right, because
+  // launching a different build than the one named is the worse answer.
+  assert.equal(resolveAppImage({ home, env: {} }).path, usable);
+  assert.equal(resolveAppImage({ home, env: {} }).rejected, undefined);
 });
