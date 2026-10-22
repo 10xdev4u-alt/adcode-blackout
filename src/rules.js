@@ -10,13 +10,27 @@
  * Matching is ordered and first-wins, which makes a broad future rule safe to
  * put after the exact ones.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { configHome } from "./policy.js";
 
 export const ACTIONS = new Set(["empty-serve", "ack-receipts", "rewrite-config", "block", "pass"]);
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "*"]);
 
 function ruleUrl(name) {
   return new URL(`../rules/${name}.json`, import.meta.url);
+}
+
+/**
+ * Where a user pack lives, if one does.
+ *
+ * The bundled pack is the default, not the ceiling: a new endpoint should be a
+ * file the user can add and reload, not a reason to edit an installed package
+ * or wait for a release. The override is validated by exactly the same loader,
+ * so a typo is refused at load and the old pack can stay in place.
+ */
+export function userRulePath(name) {
+  return join(configHome(), "rules", `${name}.json`);
 }
 
 export function validatePack(pack) {
@@ -69,8 +83,16 @@ export function validatePack(pack) {
   });
 }
 
-export function loadRulePack(name = "core", file = ruleUrl(name)) {
-  return validatePack(JSON.parse(readFileSync(file, "utf8")));
+export function loadRulePack(name = "core", file = null) {
+  const override = userRulePath(name);
+  const path = file ?? (existsSync(override) ? override : ruleUrl(name));
+  let pack;
+  try {
+    pack = validatePack(JSON.parse(readFileSync(path, "utf8")));
+  } catch (error) {
+    throw new Error(`${String(path)}: ${String(error.message ?? error)}`);
+  }
+  return Object.freeze({ ...pack, source: String(path) });
 }
 
 export function matches(rule, method, path) {

@@ -124,6 +124,20 @@ test("an ad-like path outside the rule pack is recorded once", async () => {
   assert.equal(seen[0].data.path, "/v1/sponsors");
 });
 
+test("setRules swaps the pack without restarting the server", async () => {
+  const before = await fetch(`${proxy.url}/v1/extra`, { method: "POST", body: "{}" });
+  assert.equal(before.status, 200, "core has no rule for this path, so it passes");
+
+  proxy.setRules({
+    name: "test",
+    version: 1,
+    rules: [{ id: "extra", action: "block", method: "POST", path: "/v1/extra", pattern: null, since: null, note: "" }],
+  });
+  const after = await fetch(`${proxy.url}/v1/extra`, { method: "POST", body: "{}" });
+  assert.equal(after.status, 403);
+  assert.equal(journal.entries.at(-1).kind, "request-blocked");
+});
+
 test("the AI path is never mistaken for an ad endpoint", async () => {
   await fetch(`${proxy.url}/v1/chat`, { method: "POST", body: "{}" }).then((r) => r.text());
   assert.equal(journal.entries.filter((e) => e.kind === "endpoint-seen").length, 0);

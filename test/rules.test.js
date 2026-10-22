@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadRulePack, matchRule, coveredTargets, validatePack } from "../src/rules.js";
+import { loadRulePack, matchRule, coveredTargets, userRulePath, validatePack } from "../src/rules.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 const pack = loadRulePack("core");
 
@@ -44,4 +47,46 @@ test("a bad pattern is refused with the rule name", () => {
 test("a duplicate rule id is refused", () => {
   const rule = { id: "same", match: { method: "POST", path: "/x" }, action: "block" };
   assert.throws(() => validatePack({ name: "x", rules: [rule, rule] }), /duplicate/);
+});
+
+test("a user pack overrides the bundled one, and says where it came from", () => {
+  const home = mkdtempSync(join(tmpdir(), "blackout-rules-"));
+  const previous = process.env["BLACKOUT_HOME"];
+  process.env["BLACKOUT_HOME"] = home;
+  try {
+    const path = userRulePath("custom");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      name: "custom",
+      version: 3,
+      rules: [{ id: "extra", match: { method: "POST", path: "/v1/extra" }, action: "block" }],
+    }));
+
+    const pack = loadRulePack("custom");
+    assert.equal(pack.name, "custom");
+    assert.equal(pack.version, 3);
+    assert.equal(pack.source, path);
+    const matched = matchRule(pack, "POST", "/v1/extra");
+    assert.equal(matched.action, "block");
+  } finally {
+    if (previous === undefined) delete process.env["BLACKOUT_HOME"];
+    else process.env["BLACKOUT_HOME"] = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("an invalid user pack is refused with its path, not silently ignored", () => {
+  const home = mkdtempSync(join(tmpdir(), "blackout-rules-bad-"));
+  const previous = process.env["BLACKOUT_HOME"];
+  process.env["BLACKOUT_HOME"] = home;
+  try {
+    const path = userRulePath("core");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "{ this is not json");
+    assert.throws(() => loadRulePack("core"), (error) => error.message.includes(path));
+  } finally {
+    if (previous === undefined) delete process.env["BLACKOUT_HOME"];
+    else process.env["BLACKOUT_HOME"] = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
 });

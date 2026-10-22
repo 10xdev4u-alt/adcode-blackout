@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A user rule pack at `~/.config/blackout/rules/<name>.json` overrides the
+  bundled pack, validated by the same loader. `SIGHUP` reloads it live:
+  `rules-reloaded` on success, `rules-rejected` plus the old pack on a typo.
 - The journal now rotates at 5 MiB into `journal.0001.jsonl`, `0002`, ... with
   the hash chain continuing across files. `verify` and an offline report read
   every segment and name a tampered entry by its absolute index.
