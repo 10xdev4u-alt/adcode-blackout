@@ -215,6 +215,21 @@ function execLine(text) {
 }
 
 /**
+ * Does this Exec line launch *an* ADCode AppImage, not necessarily the current
+ * one?
+ *
+ * Matching only the resolved path means an entry is left pointing at the old
+ * filename after an update, and the new install does not touch it - the exact
+ * case the launcher exists for. Any ADCode*.AppImage token counts, because the
+ * wrapper re-resolves the newest one at run time.
+ */
+function launchesAdcode(exec, appImage) {
+  const cleaned = exec.replace(/["']/g, "");
+  if (cleaned.includes(appImage)) return true;
+  return cleaned.split(/\s+/).some((token) => APPIMAGE_NAME.test(basename(token)));
+}
+
+/**
  * Point the desktop entry at the wrapper, keeping a one-time backup.
  *
  * Matching is deliberately narrow: only entries that already launch this
@@ -224,7 +239,6 @@ function execLine(text) {
  */
 export function patchDesktopEntries({ home = homedir(), appImage, wrapper = wrapperPath(home) }) {
   const patched = [];
-  const wanted = basename(appImage).toLowerCase();
   for (const file of desktopFiles(home)) {
     let text;
     try {
@@ -234,7 +248,7 @@ export function patchDesktopEntries({ home = homedir(), appImage, wrapper = wrap
     }
     const exec = execLine(text);
     if (exec === null) continue;
-    if (!exec.includes(appImage) && !exec.toLowerCase().includes(wanted)) continue;
+    if (!launchesAdcode(exec, appImage)) continue;
     if (exec.includes(wrapper)) continue;
 
     const backup = `${file}.blackout-backup`;

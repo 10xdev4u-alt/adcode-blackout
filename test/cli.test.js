@@ -154,6 +154,35 @@ test("install, launch, pause, report, verify, uninstall", async () => {
   assert.equal(existsSync(join(home, ".config", "blackout", "config.json")), false);
 });
 
+test("install --desktop repoints an older AppImage entry, and uninstall restores it", async () => {
+  const { home, app } = await setup(18801);
+  const dir = join(home, ".local", "share", "applications");
+  mkdirSync(dir, { recursive: true });
+  const entry = join(dir, "adcode.desktop");
+  const original = `[Desktop Entry]\nType=Application\nName=ADCode\nExec=/old/ADCode-2.3.0.AppImage %U\n`;
+  writeFileSync(entry, original);
+
+  const installed = run(home, ["install", "--app", app, "--desktop"]);
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.match(installed.stdout, /desktop\s+.*adcode\.desktop/);
+  assert.match(readFileSync(entry, "utf8"), new RegExp(`Exec="${join(home, ".local", "bin", "adcode")}" %U`));
+
+  const removed = run(home, ["uninstall"]);
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.equal(readFileSync(entry, "utf8"), original);
+});
+
+test("doctor warns when the launcher points at another checkout", async () => {
+  const { home } = await setup(18802);
+  const wrapper = join(home, ".local", "bin", "adcode");
+  mkdirSync(join(home, ".local", "bin"), { recursive: true });
+  writeFileSync(wrapper, "#!/bin/sh\n# adcode-blackout launcher\nNODE='node'\nexec \"$NODE\" '/old/checkout/bin/blackout.js' launch -- \"$@\"\n");
+
+  const result = run(home, ["doctor"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /warn\s+launcher\s+.*points at \/old\/checkout/);
+});
+
 test("purge refuses to follow a symlink out of the state directory", async () => {
   const { home } = await setup(18800);
   const target = join(home, "outside.txt");
