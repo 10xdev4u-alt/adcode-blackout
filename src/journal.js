@@ -11,10 +11,52 @@
  * head hash the report already published.
  */
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 export const GENESIS = "0".repeat(64);
+
+/** Five MiB is roughly 25,000 decisions. Small enough to read at startup. */
+export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** `journal.jsonl` -> `journal.0001.jsonl`, `journal.0002.jsonl`, ... */
+function segmentNames(filePath) {
+  const dir = dirname(filePath);
+  const base = basename(filePath);
+  const stem = base.replace(/\.jsonl$/, "");
+  const pattern = new RegExp(`^${escapeRegExp(stem)}\\.(\\d+)\\.jsonl$`);
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .map((name) => ({ name, match: pattern.exec(name) }))
+    .filter(({ match }) => match !== null)
+    .map(({ name, match }) => ({ name, index: Number(match[1]) }))
+    .sort((a, b) => a.index - b.index)
+    .map(({ name }) => join(dir, name));
+}
+
+/**
+ * Every entry on disk, oldest first: rotated segments, then the live file.
+ *
+ * Rotation keeps the chain intact because the first entry of a new file points
+ * at the last hash of the previous one. Concatenating in this order is exactly
+ * the chain `verifyChain` expects.
+ */
+export function readJournalChain(filePath) {
+  const entries = [];
+  for (const file of [...segmentNames(filePath), ...(existsSync(filePath) ? [filePath] : [])]) {
+    entries.push(...readJournal(file));
+  }
+  return entries;
+}
 
 function digest(entry) {
   return createHash("sha256")
@@ -30,15 +72,15 @@ function digest(entry) {
  * genuinely broken chain is not repaired: it is reported, so the record keeps
  * its meaning.
  */
-export function createJournal(filePath = null) {
+export function createJournal(filePath = null, { maxBytes = DEFAULT_MAX_BYTES } = {}) {
   const entries = [];
   const listeners = new Set();
   let integrity = { ok: true, brokenAt: null };
   let prev = GENESIS;
   let seq = 0;
 
-  if (filePath !== null && existsSync(filePath)) {
-    const loaded = readJournal(filePath);
+  if (filePath !== null) {
+    const loaded = readJournalChain(filePath);
     entries.push(...loaded);
     if (loaded.length > 0) {
       const last = loaded[loaded.length - 1];
@@ -46,6 +88,31 @@ export function createJournal(filePath = null) {
       seq = last.seq + 1;
       integrity = verifyChain(loaded);
     }
+  }
+
+  /**
+   * Move the live file aside once it passes the threshold.
+   *
+   * Checked after an append, not before: an entry that would cross the line is
+   * written to the file it belongs to, and the next append starts a fresh file.
+   * Renaming is atomic on the same filesystem, so a crash leaves either the old
+   * name or the segment, never half of each.
+   */
+  function rotateIfNeeded() {
+    if (filePath === null) return;
+    let size;
+    try {
+      size = statSync(filePath).size;
+    } catch {
+      return;
+    }
+    if (size <= maxBytes) return;
+
+    const segments = segmentNames(filePath);
+    const next = segments.length === 0 ? 1 : Number(/\.(\d+)\.jsonl$/.exec(segments[segments.length - 1])[1]) + 1;
+    const target = join(dirname(filePath), `${basename(filePath).replace(/\.jsonl$/, "")}.${String(next).padStart(4, "0")}.jsonl`);
+    renameSync(filePath, target);
+    writeFileSync(filePath, "", "utf8");
   }
 
   function append(kind, data = {}) {
@@ -57,6 +124,7 @@ export function createJournal(filePath = null) {
       appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
     }
     entries.push(entry);
+    rotateIfNeeded();
     for (const listener of listeners) {
       try {
         listener(entry);
@@ -79,6 +147,7 @@ export function createJournal(filePath = null) {
     get entries() { return entries; },
     get integrity() { return integrity; },
     get path() { return filePath; },
+    get segments() { return filePath === null ? [] : segmentNames(filePath); },
     head: () => prev,
   };
 }

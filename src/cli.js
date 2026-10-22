@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, rmdirSync, unlinkSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { createProxy } from "./proxy.js";
-import { createJournal, readJournal, verifyChain } from "./journal.js";
+import { createJournal, readJournalChain, verifyChain } from "./journal.js";
 import { loadPolicy, parsePolicy, ensureHome, journalPath, logPath, pidPath, policyPath, stateHome, configHome } from "./policy.js";
 import { loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
@@ -87,7 +87,7 @@ async function request(url, options = {}) {
 
 function journalOrEmpty() {
   const path = journalPath();
-  return existsSync(path) ? readJournal(path) : [];
+  return existsSync(path) ? readJournalChain(path) : [];
 }
 
 async function commandServe(values) {

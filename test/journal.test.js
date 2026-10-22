@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJournal, GENESIS, readJournal, summarize, verifyChain } from "../src/journal.js";
+import { createJournal, GENESIS, readJournal, readJournalChain, summarize, verifyChain } from "../src/journal.js";
 
 function tempJournal() {
   return join(mkdtempSync(join(tmpdir(), "blackout-journal-")), "journal.jsonl");
@@ -63,6 +63,56 @@ test("a truncated final line is dropped, not fatal", () => {
   const entries = readJournal(path);
   assert.equal(entries.length, 2);
   assert.deepEqual(verifyChain(entries), { ok: true, brokenAt: null });
+});
+
+test("rotation keeps one file bounded and the chain intact", () => {
+  const path = tempJournal();
+  const journal = createJournal(path, { maxBytes: 600 });
+  for (let index = 0; index < 12; index++) journal.append("serve-blocked", { index });
+
+  assert.ok(journal.segments.length > 0, "at least one segment should exist");
+  assert.match(journal.segments[0], /journal\.0001\.jsonl$/);
+
+  const all = readJournalChain(path);
+  assert.equal(all.length, 12);
+  assert.deepEqual(all.map((entry) => entry.seq), [...Array(12).keys()]);
+  assert.deepEqual(verifyChain(all), { ok: true, brokenAt: null });
+
+  // The live file is the complement of the segments, and is smaller than the
+  // segments plus the one entry that crossed the threshold.
+  const live = readJournal(path);
+  assert.equal(live.length + journal.segments.reduce((total, file) => total + readJournal(file).length, 0), 12);
+});
+
+test("a rotated journal resumes with the next sequence number", () => {
+  const path = tempJournal();
+  const first = createJournal(path, { maxBytes: 500 });
+  for (let index = 0; index < 8; index++) first.append("a", { index });
+
+  const second = createJournal(path, { maxBytes: 500 });
+  assert.equal(second.entries.length, 8);
+  assert.equal(second.head(), first.head());
+  second.append("b", { after: true });
+
+  const all = readJournalChain(path);
+  assert.equal(all.length, 9);
+  assert.equal(all.at(-1).seq, 8);
+  assert.deepEqual(verifyChain(all), { ok: true, brokenAt: null });
+});
+
+test("tampering in a rotated segment is named at its absolute index", () => {
+  const path = tempJournal();
+  const journal = createJournal(path, { maxBytes: 500 });
+  for (let index = 0; index < 8; index++) journal.append("a", { index });
+
+  const segment = journal.segments[0];
+  assert.ok(segment);
+  const lines = readJournal(segment).map((entry) => JSON.stringify(entry));
+  lines[1] = JSON.stringify({ ...JSON.parse(lines[1]), data: { index: 999 } });
+  writeFileSync(segment, `${lines.join("\n")}\n`);
+
+  const all = readJournalChain(path);
+  assert.deepEqual(verifyChain(all), { ok: false, brokenAt: 1 });
 });
 
 test("summarize counts each kind", () => {
