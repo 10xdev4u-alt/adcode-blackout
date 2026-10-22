@@ -122,6 +122,17 @@ test("desktop entries for this AppImage are repointed, with a backup", () => {
   assert.match(readFileSync(entry, "utf8"), new RegExp(app.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("an entry for an older AppImage is repointed too", () => {
+  const old = join(applicationsDir(home), "adcode.desktop");
+  mkdirSync(applicationsDir(home), { recursive: true });
+  writeFileSync(old, `[Desktop Entry]\nExec="/home/me/Applications/ADCode-2.3.0.AppImage" %U\n`);
+  const current = APP("ADCode-2.5.0.AppImage");
+  const patched = patchDesktopEntries({ home, appImage: current });
+  assert.equal(patched.length, 1);
+  assert.match(readFileSync(old, "utf8"), new RegExp(`Exec="${wrapperPath(home)}" %U`));
+  assert.ok(existsSync(`${old}.blackout-backup`));
+});
+
 test("patchDesktopEntries does not touch an entry twice", () => {
   const app = APP("ADCode-2.4.0.AppImage");
   mkdirSync(applicationsDir(home), { recursive: true });
