@@ -183,6 +183,35 @@ test("doctor warns when the launcher points at another checkout", async () => {
   assert.match(result.stdout, /warn\s+launcher\s+.*points at \/old\/checkout/);
 });
 
+test("uninstall stops the proxy it started", async () => {
+  const { home, app } = await setup(18803);
+  try {
+    const launched = run(home, ["launch", "--app", app]);
+    assert.equal(launched.status, 0, launched.stderr);
+    assert.equal(await waitFor(async () => {
+      try {
+        return (await fetch("http://127.0.0.1:18803/_blackout/health")).ok;
+      } catch {
+        return false;
+      }
+    }), true);
+
+    const removed = run(home, ["uninstall"]);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.match(removed.stdout, /proxy\s+stopped pid \d+/);
+    assert.equal(await waitFor(async () => {
+      try {
+        await fetch("http://127.0.0.1:18803/_blackout/health", { signal: AbortSignal.timeout(200) });
+        return false;
+      } catch {
+        return true;
+      }
+    }), true);
+  } finally {
+    stopProxy(home);
+  }
+});
+
 test("purge refuses to follow a symlink out of the state directory", async () => {
   const { home } = await setup(18800);
   const target = join(home, "outside.txt");
