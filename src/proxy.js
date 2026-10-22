@@ -22,12 +22,31 @@ import { renderDashboard } from "./dashboard.js";
 import { VERSION } from "./version.js";
 
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const BODY_LIMIT = 2 * 1024 * 1024;
 const CONFIG_TIMEOUT_MS = 8_000;
 /** The client rejects an ack outside this shape, so never send one. */
 const ACKABLE = /^[A-Za-z0-9_-]{1,64}$/;
 /** Paths that look like advertising, for discovery only. */
 const AD_LIKE = /(?:^|\/)(ad|ads|advert|adverts|advertising|serve|serves|receipt|receipts|impression|impressions|sponsor|sponsors|sponsored|promo|promos|promotion|promotions|offer|offers|bid|bids|auction|auctions|campaign|campaigns|creative|creatives)(?:\/|$)/i;
+
+/**
+ * The Host header has to name loopback, not just connect to it.
+ *
+ * DNS rebinding makes an attacker page same-origin with 127.0.0.1: the browser
+ * sends its own hostname in Host and treats the response as same-origin, which
+ * is exactly the condition the control header was meant to prevent. Reading the
+ * socket address would not catch this; the header is the part the page controls.
+ */
+function loopbackHost(header) {
+  if (typeof header !== "string" || header === "") return false;
+  try {
+    const hostname = new URL(`http://${header}`).hostname;
+    return LOOPBACK_HOSTS.has(hostname.replace(/^\[|\]$/g, ""));
+  } catch {
+    return false;
+  }
+}
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -95,6 +114,16 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
   }
 
   async function handle(req, res) {
+    if (!loopbackHost(req.headers.host)) {
+      const key = String(req.headers.host ?? "");
+      if (!discovered.has(`host ${key}`)) {
+        discovered.add(`host ${key}`);
+        journal.append("host-rejected", { host: key });
+      }
+      sendJson(res, 421, { error: "host-not-loopback" });
+      return;
+    }
+
     const url = new URL(req.url ?? "/", `http://${policy.host}`);
 
     if (url.pathname.startsWith("/_blackout/")) {
