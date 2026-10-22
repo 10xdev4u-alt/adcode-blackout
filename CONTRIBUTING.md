@@ -1,0 +1,56 @@
+# Contributing
+
+The project has no dependencies and no build step. Clone it, run `npm test`,
+and you have the whole development loop.
+
+## The invariants worth protecting
+
+1. **An ad failure never costs an editor.** Any new code on the request path
+   must degrade, not throw. `contain()` in the ad service and the try/catch in
+   `launch` exist for this reason; do not remove them.
+2. **Only matched paths are parsed.** Pass-through stays a pipe. If a change
+   needs to buffer a request to do its job, it needs a rule and a test that
+   says why.
+3. **A receipt is acked, never claimed.** The queue drains locally; no receipt
+   is forwarded upstream, ever.
+4. **The journal says what happened.** New decision points get a journal kind
+   and a report total, or they are invisible.
+
+## Tests
+
+- Every rule has a matching test in `test/rules.test.js`.
+- Every response shape is tested against the *client's* validator, not a shape
+  we invented; see `test/proxy.test.js`.
+- A CLI change goes through `test/cli.test.js`, which runs the real binary in a
+  temporary HOME.
+- Desktop resolution is tested with real files and mtimes in
+  `test/desktop.test.js`; do not mock the filesystem there.
+
+Run `node scripts/smoke.js` before touching a real install.
+
+## Rule changes
+
+Rules are data. Adding an endpoint is a `rules/core.json` change plus:
+
+- a case in `test/rules.test.js`,
+- a response test in `test/proxy.test.js`,
+- a line in `docs/RULES.md` if the action is new.
+
+Prefer an exact path. Use a version-tolerant pattern only when the version is
+the only thing that moves, and anchor it.
+
+## Style
+
+- Node ESM, no TypeScript in this repo.
+- Comments explain *why*, especially where a choice looks odd.
+- Keep the CLI's output aligned and lowercase; scripts consume it.
+- No new runtime dependency without a very good reason. The whole tool is
+  standard library.
+
+## Commits and PRs
+
+Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`), one concern
+per commit. Open an issue for anything larger than a typo; the issue templates
+ask for the two things that matter (a reproduction and a rule/journal excerpt).
+
+By contributing you agree your work is licensed under Apache-2.0.
