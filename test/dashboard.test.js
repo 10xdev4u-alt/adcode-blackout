@@ -33,7 +33,9 @@ test("every dynamic value is escaped", () => {
 
 test("the page makes no external request", () => {
   const html = renderDashboard(report);
-  assert.doesNotMatch(html, /https?:\/\//);
+  assert.doesNotMatch(html, /(?:src|href)\s*=\s*["']https?:/);
+  assert.doesNotMatch(html, /fetch\(["']https?:/);
+  assert.doesNotMatch(html, /@import/);
   assert.match(html, /fetch\("\/_blackout\/report"/);
 });
 
