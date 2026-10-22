@@ -16,15 +16,26 @@ is what it depends on, and how to check after a release.
 Nothing else. No internal module path, no symbol, no asar entry, no build hash,
 no certificate.
 
-## After an ADCode update: the two-minute check
+## After an ADCode update: one command
 
 ```sh
-blackout doctor
-blackout launch
+blackout compat
 ```
 
-Then, with the editor open for a full scheduler interval (60 seconds of settle
-plus one tick):
+It starts a private proxy on an ephemeral port, launches the AppImage against
+it for 60 seconds, and judges what happened: did `/v1/serve` get answered, did
+`/v1/config` get rewritten, did the app call anything ad-like outside the pack,
+did it die. Exit `0` is a pass, `1` is inconclusive (the app talked to the
+proxy but had no ad opportunity - open the editor, keep it focused, run
+`blackout compat --seconds 180`), `2` is a failure. A run that is not a pass
+keeps its journal and the app's log and prints both paths, so a failure can be
+read rather than guessed at. `--json` prints the same verdict as an object.
+
+The harness uses its own journal in a temp directory and never touches the
+installed state, so it can run while the normal blocker is up.
+
+For the human numbers, after the editor has been open for a full scheduler
+interval (60 seconds of settle plus one tick):
 
 ```sh
 blackout report

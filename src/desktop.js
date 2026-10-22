@@ -123,7 +123,11 @@ export function resolveAppImage({ explicit = null, home = homedir(), env = proce
   if (discovered.length > 0) {
     return { path: discovered[0].path, reason: "newest", found: true, alternatives: discovered.map((one) => one.path) };
   }
-  return { path: null, reason: "none", found: false };
+  // A path the caller named but could not use is worth naming back. "No AppImage
+  // found" after `--app ./ADCode.AppImage` sends people looking in the wrong
+  // place, when the answer is that the path is missing or far too small.
+  const rejected = explicit !== null && !looksLikeAppImage(explicit) ? explicit : null;
+  return { path: null, reason: "none", found: false, rejected };
 }
 
 export function recordAppImage(path, home = homedir()) {

@@ -100,6 +100,17 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
   let activeRules = rules;
   const startedAt = now();
   const discovered = new Set();
+  /*
+   * Application traffic, counted but not journaled.
+   *
+   * The journal records decisions, so a build that only makes pass-through
+   * calls - chat, releases, anything not ad-like - leaves no entry at all. The
+   * compatibility harness has to tell that apart from "the app never called us",
+   * which is a completely different answer, so the count lives here and not in
+   * the log. `/_blackout/*` is excluded: that is the harness and the CLI
+   * talking, not the app.
+   */
+  const stats = { requests: 0, passed: 0 };
 
   function report() {
     return buildReport(journal.entries, {
@@ -138,6 +149,8 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       await local(req, res, url);
       return;
     }
+
+    stats.requests += 1;
 
     if (!enabled) {
       pass(req, res, url);
@@ -233,6 +246,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
   }
 
   function pass(req, res, url) {
+    stats.passed += 1;
     let target;
     try {
       target = new URL(`${policy.upstream}${url.pathname}${url.search}`);
@@ -283,6 +297,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
         // Null while the record is being written; `{ at, message }` afterwards.
         // Blocking continues either way - see `noteWriteError` in journal.js.
         journalWriteError: journal.writeError ?? null,
+        requests: stats.requests,
       });
       return;
     }
@@ -356,6 +371,8 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
     setEnabled(value) { enabled = Boolean(value); },
     /** Swap the pack after a validated reload; matching takes effect immediately. */
     setRules(next) { activeRules = next; },
+    /** `{ requests, passed }` for application traffic since listen. */
+    stats: () => ({ ...stats }),
     report,
     async listen(port = policy.port, host = policy.host) {
       await new Promise((resolve, reject) => {

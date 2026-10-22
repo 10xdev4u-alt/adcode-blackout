@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `blackout compat [--app PATH] [--seconds N] [--json] [--keep]` runs a build
+  against a private proxy and judges whether the contract still holds: serve
+  answered, config rewritten, no ad-like endpoint passed through, app alive.
+  Exit 0 pass, 1 inconclusive, 2 fail; a run that is not a pass keeps its
+  journal and app log for reading. This replaces the manual two-minute check in
+  docs/COMPATIBILITY.md and is the check to run before trusting a new AppImage.
+- An `--app` path that exists but is not usable (missing, not a file, under
+  1 MiB) is now named back instead of falling through to "no AppImage found".
+
 ## 0.3.1 - 2026-10-23
 
 - A journal that cannot be written no longer fails open. A full or read-only

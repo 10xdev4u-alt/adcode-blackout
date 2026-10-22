@@ -90,6 +90,22 @@ blackout rules             # the active pack, with --json for the raw object
 blackout events            # follow decisions live; --once for scripts
 ```
 
+After an app update, prove the contract with the build itself:
+
+```sh
+blackout compat                 # 60s window, then a verdict
+blackout compat --seconds 180   # longer, if no ad slot came up
+blackout compat --json          # the verdict as an object, for CI
+```
+
+It starts a private proxy on an ephemeral port, launches the AppImage against
+it, and reports whether `/v1/serve` and `/v1/config` were answered and whether
+any ad-like endpoint slipped past the pack. Exit 0 is a pass, 1 is
+inconclusive (contacted, but no ad opportunity in the window), 2 is a failure.
+A run that is not a pass keeps its journal and app log and prints both paths.
+It uses no state from a real install, so it is safe to run while the normal
+blocker is up.
+
 Diagnose a launch without starting an editor:
 
 ```sh
@@ -129,7 +145,9 @@ cannot hit it with a form post.
   with a different maintenance cost.
 - **No first-party sneaking.** If a future build stops reading
   `ADCODE_AD_SERVER`, or hard-codes ads into the bundle, blackout cannot see
-  them. `doctor` and the journal's `endpoint-seen` entries are how you find out.
+  them. `blackout compat` fails when a build never calls the proxy, `doctor`
+  checks the integration, and the journal's `endpoint-seen` entries name a new
+  ad path.
 - **Not a general ad blocker.** It answers ADCode's ad API, not the web.
 - **Linux only for now.** The proxy is portable Node; the launcher and
   `.desktop` integration are Linux-specific. macOS and Windows launchers are

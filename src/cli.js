@@ -15,6 +15,7 @@ import { bundledRulePath, loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
 import { VERSION } from "./version.js";
 import { probe, proxyUrl, ensureProxy, launchApp, writePid, removePid } from "./launch.js";
+import { formatCompat, runCompat } from "./compat.js";
 import { describePid, isBlackoutPid, listenerPid } from "./netinfo.js";
 import {
   installWrapper,
@@ -45,6 +46,11 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
       Start the proxy if needed, then start ADCode with ADCODE_AD_SERVER set.
       --dry-run    print the resolved AppImage, URL and argv; start nothing
 
+  blackout compat [--app PATH] [--seconds N] [--json] [--keep]
+      Launch a build against a private proxy and judge whether it still calls
+      /v1/serve and /v1/config, and whether anything ad-like slips past the
+      pack. Exit 0 pass, 1 inconclusive, 2 fail.
+
   blackout serve [--port N] [--foreground|--detach]
       Run the proxy. Foreground by default.
 
@@ -66,6 +72,19 @@ then the newest ADCode*.AppImage in ~/Applications, ~/AppImages, ~/Downloads or
 function fail(message, code = 1) {
   console.error(`blackout: ${message}`);
   return code;
+}
+
+/**
+ * The same failure for every command that needs an AppImage.
+ *
+ * A path the user named gets named back when it is unusable; the generic
+ * message is only for "nothing was found anywhere".
+ */
+function noAppImage(resolved) {
+  if (resolved.rejected) {
+    return fail(`${resolved.rejected} is not a usable AppImage: missing, not a file, or smaller than 1 MiB.`, 2);
+  }
+  return fail("no ADCode AppImage found. Pass --app /path/to/ADCode.AppImage, or set ADCODE_APPIMAGE.", 2);
 }
 
 function readPolicy() {
@@ -185,12 +204,7 @@ async function commandServe(values) {
 async function commandLaunch(values, rest) {
   const policy = readPolicy();
   const resolved = resolveAppImage({ explicit: values.app ?? null });
-  if (!resolved.found) {
-    return fail(
-      "no ADCode AppImage found. Pass --app /path/to/ADCode.AppImage, or set ADCODE_APPIMAGE.",
-      2,
-    );
-  }
+  if (!resolved.found) return noAppImage(resolved);
 
   if (values["dry-run"]) {
     const url = proxyUrl(policy);
@@ -230,9 +244,7 @@ function systemctl(args) {
 async function commandInstall(values) {
   const policy = readPolicy();
   const resolved = resolveAppImage({ explicit: values.app ?? null });
-  if (!resolved.found) {
-    return fail("no ADCode AppImage found. Pass --app /path/to/ADCode.AppImage.", 2);
-  }
+  if (!resolved.found) return noAppImage(resolved);
 
   recordAppImage(resolved.path);
   const wrapper = installWrapper({ cli: CLI });
@@ -555,6 +567,35 @@ function commandVerify() {
   return 1;
 }
 
+async function commandCompat(values) {
+  const policy = readPolicy();
+  const resolved = resolveAppImage({ explicit: values.app ?? null });
+  if (!resolved.found) return noAppImage(resolved);
+  const seconds = values.seconds === undefined ? 60 : Number(values.seconds);
+  if (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > 3_600) {
+    return fail("--seconds must be an integer between 1 and 3600", 2);
+  }
+
+  let rules;
+  try {
+    rules = loadRulePack(policy.rules);
+  } catch (error) {
+    return fail(`cannot load the ${policy.rules} rule pack: ${String(error.message ?? error)}`);
+  }
+
+  // The window is the point: a build that never asks for an ad proves nothing in
+  // five seconds, so say what is happening and that it ends on its own.
+  console.error(`blackout: starting ${resolved.path} against a private proxy for ${seconds}s`);
+  console.error("blackout: open a file and keep the editor focused until the window closes");
+
+  const result = await runCompat({ appImage: resolved.path, seconds, policy, rules, keep: values.keep === true });
+
+  if (values.json) console.log(JSON.stringify({ ...result, appImage: resolved.path }, null, 2));
+  else console.log(formatCompat({ ...result, appImage: resolved.path }));
+
+  return result.verdict === "pass" ? 0 : result.verdict === "inconclusive" ? 1 : 2;
+}
+
 async function commandControl(action) {
   const policy = readPolicy();
   const result = await request(`${proxyUrl(policy)}/_blackout/${action}`, {
@@ -736,6 +777,18 @@ export async function main(argv) {
       case "report": {
         const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });
         return await commandReport(values);
+      }
+      case "compat": {
+        const { values } = parseArgs({
+          args,
+          options: {
+            app: { type: "string" },
+            seconds: { type: "string" },
+            json: { type: "boolean" },
+            keep: { type: "boolean" },
+          },
+        });
+        return await commandCompat(values);
       }
       case "verify":
         return commandVerify();
