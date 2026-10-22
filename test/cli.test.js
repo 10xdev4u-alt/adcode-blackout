@@ -31,13 +31,13 @@ function run(home, args, extraEnv = {}) {
   });
 }
 
-async function setup() {
+async function setup(port = PORT) {
   const home = await mkdtemp(join(tmpdir(), "blackout-cli-"));
   mkdirSync(join(home, "Applications"), { recursive: true });
   mkdirSync(join(home, ".config", "blackout"), { recursive: true });
   writeFileSync(
     join(home, ".config", "blackout", "config.json"),
-    `${JSON.stringify({ port: PORT, upstream: "http://127.0.0.1:9" }, null, 2)}\n`,
+    `${JSON.stringify({ port, upstream: "http://127.0.0.1:9" }, null, 2)}\n`,
   );
 
   const out = join(home, "launched.txt");
@@ -100,6 +100,14 @@ test("install, launch, pause, report, verify, uninstall", async () => {
     assert.equal(status.status, 0, status.stderr);
     assert.match(status.stdout, /blocking/);
 
+    const scriptable = run(home, ["status", "--json"]);
+    assert.equal(scriptable.status, 0, scriptable.stderr);
+    const statusObject = JSON.parse(scriptable.stdout);
+    assert.equal(statusObject.running, true);
+    assert.equal(statusObject.url, `http://127.0.0.1:${PORT}`);
+    assert.equal(typeof statusObject.totals.servesBlocked, "number");
+    assert.equal(statusObject.integrity.ok, true);
+
     const paused = run(home, ["pause"]);
     assert.equal(paused.status, 0, paused.stderr);
     assert.match(paused.stdout, /paused/);
@@ -143,6 +151,27 @@ test("an unknown command is a usage error, not a stack trace", async () => {
   const result = run(home, ["frobnicate"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /unknown command/);
+});
+
+test("status --json is explicit about not running", async () => {
+  const { home } = await setup(18795);
+  const result = run(home, ["status", "--json"]);
+  assert.equal(result.status, 1);
+  const object = JSON.parse(result.stdout);
+  assert.equal(object.running, false);
+  assert.equal(object.url, "http://127.0.0.1:18795");
+});
+
+test("launch --dry-run starts nothing and prints what it would do", async () => {
+  const { home, app, out } = await setup(18796);
+  const result = run(home, ["launch", "--dry-run", "--app", app, "--", "--flag"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`appimage\\s+${app.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(result.stdout, /resolved\s+explicit/);
+  assert.match(result.stdout, /env\s+ADCODE_AD_SERVER=http:\/\/127\.0\.0\.1:18796/);
+  assert.match(result.stdout, /argv\s+.*--flag/);
+  assert.equal(existsSync(out), false, "the app must not run");
+  await assert.rejects(fetch("http://127.0.0.1:18796/_blackout/health"), /fetch failed/);
 });
 
 test("launch without an AppImage says how to point at one", async () => {

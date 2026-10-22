@@ -72,10 +72,20 @@ need after install.
 
 ```sh
 blackout status
+blackout status --json     # same facts, for a script
 blackout report
 blackout verify
 blackout doctor
 ```
+
+Diagnose a launch without starting an editor:
+
+```sh
+blackout launch --dry-run
+```
+
+It prints the AppImage it resolved, which rule chose it, the proxy URL and the
+exact argv, and starts nothing.
 
 `report` counts blocked serves and receipts, the minutes of attention that
 bought back, and - honestly labelled as an estimate - the earnings you chose not
