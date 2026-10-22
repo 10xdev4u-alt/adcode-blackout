@@ -317,6 +317,50 @@ test("an unknown command is a usage error, not a stack trace", async () => {
   assert.match(result.stderr, /unknown command/);
 });
 
+test("SIGHUP reloads a user rule pack and keeps the old one on a bad edit", async () => {
+  const { home } = await setup(18814);
+  const started = run(home, ["serve", "--detach"]);
+  assert.equal(started.status, 0, started.stderr);
+  try {
+    assert.equal(await waitFor(async () => {
+      try {
+        return (await fetch("http://127.0.0.1:18814/_blackout/health")).ok;
+      } catch {
+        return false;
+      }
+    }), true);
+
+    const before = await fetch("http://127.0.0.1:18814/v1/extra", { method: "POST", body: "{}" });
+    assert.equal(before.status, 502, "with the core pack this path goes upstream, which is unreachable here");
+
+    const rulesDir = join(home, ".config", "blackout", "rules");
+    mkdirSync(rulesDir, { recursive: true });
+    const pack = join(rulesDir, "core.json");
+    writeFileSync(pack, JSON.stringify({
+      name: "core",
+      version: 2,
+      rules: [{ id: "extra", match: { method: "POST", path: "/v1/extra" }, action: "block" }],
+    }));
+
+    const pid = Number(readFileSync(join(home, ".local", "state", "blackout", "blackout.pid"), "utf8").trim());
+    process.kill(pid, "SIGHUP");
+    assert.equal(await waitFor(async () => {
+      const response = await fetch("http://127.0.0.1:18814/v1/extra", { method: "POST", body: "{}" });
+      return response.status === 403;
+    }), true, "the reloaded pack should block the new path");
+
+    writeFileSync(pack, "{ broken");
+    process.kill(pid, "SIGHUP");
+    assert.equal(await waitFor(() => {
+      return readFileSync(join(home, ".local", "state", "blackout", "journal.jsonl"), "utf8").includes("rules-rejected");
+    }), true, "a rejected reload should be journaled");
+    const after = await fetch("http://127.0.0.1:18814/v1/extra", { method: "POST", body: "{}" });
+    assert.equal(after.status, 403, "the old pack must still be active after a rejected reload");
+  } finally {
+    stopProxy(home);
+  }
+});
+
 test("config shows the effective policy", async () => {
   const { home } = await setup(18810);
   const result = run(home, ["config"]);
