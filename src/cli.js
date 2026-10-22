@@ -50,6 +50,7 @@ const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
 
   blackout rules [--json]
   blackout status [--json] | report [--json] | verify
+  blackout doctor [--json]
   blackout events [--json] [--once]
   blackout --version | version
   blackout pause | resume
@@ -479,7 +480,7 @@ async function commandControl(action) {
   return 0;
 }
 
-async function commandDoctor() {
+async function commandDoctor(values = {}) {
   const checks = [];
   const add = (state, name, detail) => checks.push({ state, name, detail });
 
@@ -547,11 +548,16 @@ async function commandDoctor() {
     }
   }
 
+  const ok = !checks.some((check) => check.state === "fail");
+  if (values.json) {
+    console.log(JSON.stringify({ name: "adcode-blackout", version: VERSION, ok, checks }, null, 2));
+    return ok ? 0 : 1;
+  }
   for (const check of checks) {
     const mark = check.state === "ok" ? "ok  " : check.state === "warn" ? "warn" : "FAIL";
     console.log(`${mark} ${check.name.padEnd(9)} ${check.detail}`);
   }
-  return checks.some((check) => check.state === "fail") ? 1 : 0;
+  return ok ? 0 : 1;
 }
 
 export async function main(argv) {
@@ -625,8 +631,10 @@ export async function main(argv) {
       case "pause":
       case "resume":
         return await commandControl(command);
-      case "doctor":
-        return await commandDoctor();
+      case "doctor": {
+        const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });
+        return await commandDoctor(values);
+      }
       default:
         return fail(`unknown command ${command}\n\n${USAGE}`, 2);
     }
