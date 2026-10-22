@@ -1,6 +1,6 @@
 import { test, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,6 +156,48 @@ test("pause forwards ads again, and resume blocks them again", async () => {
 
   const resumed = await fetch(`${proxy.url}/_blackout/resume`, { method: "POST", headers: { "x-blackout-control": "1" } });
   assert.deepEqual(await resumed.json(), { enabled: true });
+});
+
+test("a non-loopback Host is refused, even for local endpoints", async () => {
+  const port = proxy.server.address().port;
+  const status = await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: "127.0.0.1",
+      port,
+      path: "/_blackout/pause",
+      method: "POST",
+      headers: { host: "evil.example", "x-blackout-control": "attacker" },
+    }, (response) => {
+      response.resume();
+      resolve(response.statusCode);
+    });
+    request.on("error", reject);
+    request.end();
+  });
+  assert.equal(status, 421);
+  assert.equal(proxy.enabled, true, "the pause must not have been applied");
+
+  const rejected = journal.entries.filter((entry) => entry.kind === "host-rejected");
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].data.host, "evil.example");
+});
+
+test("localhost is a loopback Host too", async () => {
+  const port = proxy.server.address().port;
+  const status = await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: "127.0.0.1",
+      port,
+      path: "/_blackout/health",
+      headers: { host: `localhost:${port}` },
+    }, (response) => {
+      response.resume();
+      resolve(response.statusCode);
+    });
+    request.on("error", reject);
+    request.end();
+  });
+  assert.equal(status, 200);
 });
 
 test("health reports integrity and version", async () => {

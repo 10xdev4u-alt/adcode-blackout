@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Requests whose `Host` is not loopback are refused with `421` and journaled as
+  `host-rejected`. This closes the DNS-rebinding path to pause/resume, which the
+  custom control header alone did not cover.
 - A malformed `core` override at startup falls back to the bundled pack and
   journals `rules-rejected` with `fallback`, instead of starting unprotected.
   `doctor` now checks that the active pack loads and names its source.
