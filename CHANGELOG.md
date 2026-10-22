@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 - 2026-10-23
 
 - A journal that cannot be written no longer fails open. A full or read-only
   state directory used to throw from `append`, which turned a `serve` the proxy

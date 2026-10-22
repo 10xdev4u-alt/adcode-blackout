@@ -1,6 +1,6 @@
 {
   "name": "adcode-blackout",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "type": "module",
   "description": "Path-scoped ad blocker for ADCode. No cards, no receipts, no ad traffic.",
