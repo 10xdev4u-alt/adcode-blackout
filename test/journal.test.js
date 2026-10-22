@@ -154,3 +154,13 @@ test("summarize counts each kind", () => {
   journal.append("receipt-blocked", {});
   assert.deepEqual(summarize(journal.entries), { "serve-blocked": 2, "receipt-blocked": 1 });
 });
+
+test("an unreadable journal names the file it could not read", () => {
+  const path = tempJournal();
+  mkdirSync(path);
+  assert.throws(() => createJournal(path), (error) => {
+    assert.match(error.message, /cannot read journal/);
+    assert.ok(error.message.includes(path), error.message);
+    return true;
+  });
+});
