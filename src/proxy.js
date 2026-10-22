@@ -16,7 +16,7 @@ import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { matchRule } from "./rules.js";
-import { rewriteConfig, serializeConfig, SAFE_CONFIG } from "./config.js";
+import { rewriteConfig, SAFE_CONFIG } from "./config.js";
 import { buildReport } from "./report.js";
 import { renderDashboard } from "./dashboard.js";
 import { VERSION } from "./version.js";
@@ -24,8 +24,10 @@ import { VERSION } from "./version.js";
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
 const BODY_LIMIT = 2 * 1024 * 1024;
 const CONFIG_TIMEOUT_MS = 8_000;
+/** The client rejects an ack outside this shape, so never send one. */
+const ACKABLE = /^[A-Za-z0-9_-]{1,64}$/;
 /** Paths that look like advertising, for discovery only. */
-const AD_LIKE = /(?:^|\/)(ad|ads|advert|adverts|advertising|serve|serves|receipt|receipts|impression|impressions|sponsor|sponsored|promo|promotion|offer|offers|bid|bids|auction|campaign|creative)(?:\/|$)/i;
+const AD_LIKE = /(?:^|\/)(ad|ads|advert|adverts|advertising|serve|serves|receipt|receipts|impression|impressions|sponsor|sponsors|sponsored|promo|promos|promotion|promotions|offer|offers|bid|bids|auction|auctions|campaign|campaigns|creative|creatives)(?:\/|$)/i;
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -35,16 +37,21 @@ function readBody(req, limit = BODY_LIMIT) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let stopped = false;
     req.on("data", (chunk) => {
+      if (stopped) return;
       size += chunk.length;
       if (size > limit) {
+        // Keep draining rather than destroying the socket: the caller still owes
+        // the client a 413, and a reset looks like a network fault instead.
+        stopped = true;
+        chunks.length = 0;
         reject(Object.assign(new Error("body too large"), { status: 413 }));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("end", () => { if (!stopped) resolve(Buffer.concat(chunks)); });
     req.on("error", reject);
   });
 }
@@ -126,16 +133,20 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
           sendJson(res, 400, { error: "malformed-receipts" });
           return;
         }
+        // Ack only what the client's own validation will accept: `acked` is parsed
+        // against [A-Za-z0-9_-]{1,64}, and one malformed entry fails the whole
+        // response, which would leave the queue stuck forever.
         const ids = parsed["receipts"]
           .map((item) => (isRecord(item) && typeof item["receiptId"] === "string" ? item["receiptId"] : null))
-          .filter((id) => id !== null);
+          .filter((id) => id !== null && ACKABLE.test(id));
+        const unique = [...new Set(ids)];
         journal.append("receipt-blocked", {
           path: url.pathname,
           rule: rule.id,
-          count: ids.length,
-          ids: ids.slice(0, 32),
+          count: unique.length,
+          ids: unique.slice(0, 32),
         });
-        sendJson(res, 200, { acked: ids }, { "x-blackout": "receipts-acked" });
+        sendJson(res, 200, { acked: unique }, { "x-blackout": "receipts-acked" });
         return;
       }
 
@@ -189,7 +200,9 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       return;
     }
     const request = target.protocol === "https:" ? httpsRequest : httpRequest;
-    const upstream = request(target, { method: req.method, headers: upstreamHeaders(req) }, (response) => {
+    // No shared agent: a pooled socket would outlive the request and make shutdown
+    // wait on a connection nobody is using.
+    const upstream = request(target, { method: req.method, headers: upstreamHeaders(req), agent: false }, (response) => {
       if (res.destroyed) {
         response.destroy();
         return;
@@ -225,6 +238,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
         uptimeMs: now() - startedAt,
         upstream: policy.upstream,
         integrity: journal.integrity,
+        journalHead: journal.head(),
       });
       return;
     }
@@ -256,9 +270,15 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       for (const entry of journal.entries.slice(-20)) {
         res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
       }
+      const unsubscribe = journal.subscribe((entry) => {
+        if (!res.writableEnded) res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
+      });
       const timer = setInterval(() => res.write(": heartbeat\n\n"), 15_000);
       timer.unref?.();
-      req.on("close", () => clearInterval(timer));
+      res.on("close", () => {
+        clearInterval(timer);
+        unsubscribe();
+      });
       return;
     }
 
