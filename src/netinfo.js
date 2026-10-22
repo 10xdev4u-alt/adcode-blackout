@@ -81,6 +81,15 @@ export function listenerPid(port, { platform = process.platform } = {}) {
   return pid ?? pidFromSs(port);
 }
 
+/** Is this pid plausibly the proxy we started, rather than a recycled pid? */
+export function isBlackoutPid(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("blackout");
+  } catch {
+    return false;
+  }
+}
+
 export function describePid(pid) {
   try {
     const command = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");

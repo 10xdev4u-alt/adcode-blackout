@@ -15,7 +15,7 @@ import { loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
 import { VERSION } from "./version.js";
 import { probe, proxyUrl, ensureProxy, launchApp, writePid, removePid } from "./launch.js";
-import { describePid, listenerPid } from "./netinfo.js";
+import { describePid, isBlackoutPid, listenerPid } from "./netinfo.js";
 import {
   installWrapper,
   removeWrapper,
@@ -263,7 +263,35 @@ function purgeData() {
   return removed;
 }
 
+async function stopOwnedProxy() {
+  const policy = readPolicy();
+  const url = proxyUrl(policy);
+  if ((await probe(url)) === null) return "not running";
+
+  let pid = null;
+  try {
+    pid = Number(readFileSync(pidPath(), "utf8").trim());
+  } catch {
+    pid = null;
+  }
+  if (!Number.isSafeInteger(pid) || pid <= 1 || !isBlackoutPid(pid)) {
+    return `running at ${url}, but not started by blackout; stop it yourself`;
+  }
+
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    return `running at ${url}; pid ${pid} was already gone`;
+  }
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if ((await probe(url, { timeoutMs: 200 })) === null) return `stopped pid ${pid}`;
+  }
+  return `pid ${pid} did not stop; check ${describePid(pid)}`;
+}
+
 async function commandUninstall(values) {
+  const proxy = await stopOwnedProxy();
   if (values.purge) purgeData();
   const removedUnit = removeUnit();
   if (removedUnit) {
@@ -273,6 +301,7 @@ async function commandUninstall(values) {
   const restored = restoreDesktopEntries();
   const removedWrapper = values["keep-wrapper"] ? false : removeWrapper();
   forgetAppImage();
+  console.log(`proxy      ${proxy}`);
   console.log(`unit       ${removedUnit ? "removed" : "not installed"}`);
   console.log(`desktop    ${restored.length === 0 ? "nothing to restore" : `restored ${restored.length}`}`);
   console.log(`launcher   ${removedWrapper ? "removed" : values["keep-wrapper"] ? "kept" : "not installed"}`);
