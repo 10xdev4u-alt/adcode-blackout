@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-10-23
 
 - `blackout compat [--app PATH] [--seconds N] [--json] [--keep]` runs a build
   against a private proxy and judges whether the contract still holds: serve
