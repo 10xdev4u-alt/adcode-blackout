@@ -346,6 +346,37 @@ test("an unreachable upstream is a 502 with a journal entry", async () => {
   await new Promise((resolve) => upstream.listen(Number(new URL(upstreamOrigin).port), "127.0.0.1", resolve));
 });
 
+test("an oversized config response is refused instead of buffered", async () => {
+  // A wrong or compromised upstream must not cost the proxy the body it sends:
+  // `response.text()` has no limit, and 200 MiB drove peak RSS to 723 MiB just
+  // to reach the fallback the proxy was going to use anyway.
+  const big = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("x".repeat(2 * 1024 * 1024));
+  });
+  await new Promise((resolve) => big.listen(0, "127.0.0.1", resolve));
+  const bigJournal = createJournal(null);
+  const capped = createProxy({
+    policy: parsePolicy({ upstream: `http://127.0.0.1:${big.address().port}` }),
+    journal: bigJournal,
+    rules,
+  });
+  await capped.listen(0, "127.0.0.1");
+  try {
+    const res = await fetch(`${capped.url}/v1/config`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("x-blackout"), "config-safe");
+    assert.equal((await res.json()).killSwitch, true);
+    const degraded = bigJournal.entries.filter((entry) => entry.kind === "config-degraded");
+    assert.equal(degraded.length, 1);
+    assert.match(degraded[0].data.reason, /over \d+ bytes/);
+  } finally {
+    await capped.close();
+    big.closeAllConnections?.();
+    await new Promise((resolve) => big.close(resolve));
+  }
+});
+
 test("a client that gives up before the answer closes the upstream request", async () => {
   // A stalled upstream never errors, so nothing else cleans this up: without an
   // explicit teardown each cancelled call leaks one descriptor and one request.

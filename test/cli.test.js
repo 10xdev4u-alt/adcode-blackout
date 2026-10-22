@@ -566,6 +566,15 @@ test("a broken config names the file and refuses to serve", async () => {
   assert.equal(await portFree(18796), true);
 });
 
+test("report falls back to the journal on disk when nothing is listening", async () => {
+  const { home } = await setup(18799);
+  const result = run(home, ["report"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /ads stopped\s+0/);
+  assert.match(result.stdout, /proxy not running; this report is from the journal on disk/);
+  assert.doesNotMatch(result.stderr, /fetch failed/);
+});
+
 test("events names the address when nothing is listening", async () => {
   const { home } = await setup(18797);
   const result = run(home, ["events", "--once"]);
