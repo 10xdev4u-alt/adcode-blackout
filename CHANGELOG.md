@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- An explicit `--app` path is now authoritative. A path that is missing, not a
+  file, or under 1 MiB used to fall through to a discovered AppImage, which
+  could launch (or record, or judge) a different build than the one named. It
+  is now an error naming the path.
+
 ## 0.4.1 - 2026-10-23
 
 - `blackout compat` no longer requires a rewritten `/v1/config` for a pass. A

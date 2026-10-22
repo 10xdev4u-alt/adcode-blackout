@@ -531,3 +531,22 @@ test("launch without an AppImage says how to point at one", async () => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /no ADCode AppImage found/);
 });
+
+test("compat refuses an unusable --app instead of judging another build", async () => {
+  const { home } = await setup(18794);
+  const tiny = join(home, "Applications", "ADCode-tiny.AppImage");
+  writeFileSync(tiny, "not really");
+
+  const result = run(home, ["compat", "--app", tiny]);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /is not a usable AppImage/);
+  assert.ok(result.stderr.includes(tiny), result.stderr);
+});
+
+test("compat refuses a window outside its bounds before launching anything", async () => {
+  const { home, app } = await setup(18795);
+
+  const result = run(home, ["compat", "--app", app, "--seconds", "0"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /between 1 and 3600/);
+});
