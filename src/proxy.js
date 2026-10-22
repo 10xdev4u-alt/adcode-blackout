@@ -75,6 +75,38 @@ function readBody(req, limit = BODY_LIMIT) {
   });
 }
 
+/**
+ * Read and discard the request body before answering.
+ *
+ * Node destroys the socket after a response whose request body was never
+ * consumed: the client still gets its answer, but on a connection it cannot
+ * reuse, and a large response can be cut off while it drains. The bodies this
+ * sees are the client's ad context - a few hundred bytes - so waiting costs
+ * nothing; the timeout is for a client that never finishes, which must not be
+ * able to hold a response forever.
+ */
+function drain(req, { timeoutMs = 2_000 } = {}) {
+  return new Promise((resolve) => {
+    if (req.readableEnded) {
+      resolve();
+      return;
+    }
+    const finish = () => {
+      clearTimeout(timer);
+      req.off("end", finish);
+      req.off("error", finish);
+      req.off("aborted", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    timer.unref?.();
+    req.once("end", finish);
+    req.once("error", finish);
+    req.once("aborted", finish);
+    req.resume();
+  });
+}
+
 function sendJson(res, status, body, extra = {}) {
   const text = JSON.stringify(body);
   res.writeHead(status, {
@@ -166,7 +198,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
 
     switch (rule.action) {
       case "empty-serve":
-        await req.resume().on("end", () => undefined);
+        await drain(req);
         journal.append("serve-blocked", { path: url.pathname, rule: rule.id });
         sendJson(res, 200, { creatives: [] }, { "x-blackout": "serve-empty" });
         return;
@@ -220,6 +252,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       }
 
       case "block":
+        await drain(req);
         journal.append("request-blocked", { path: url.pathname, rule: rule.id });
         sendJson(res, 403, { error: "blocked-by-blackout" }, { "x-blackout": "blocked" });
         return;

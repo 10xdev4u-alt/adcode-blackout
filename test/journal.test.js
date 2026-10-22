@@ -164,3 +164,25 @@ test("an unreadable journal names the file it could not read", () => {
     return true;
   });
 });
+
+test("a write failure leaves a gap that verify reports after a restart", () => {
+  const path = tempJournal();
+  const journal = createJournal(path);
+  // The target becomes a directory, so every append fails with EISDIR whatever
+  // user the tests run as - a chmod-based simulation passes as root.
+  mkdirSync(path);
+  journal.append("lost", { n: 1 });
+  journal.append("lost", { n: 2 });
+  assert.notEqual(journal.writeError, null);
+  assert.equal(journal.entries.length, 2, "both decisions are still in memory");
+
+  // Writing works again; the next entry keeps its real sequence number.
+  rmSync(path, { recursive: true });
+  journal.append("after", { n: 3 });
+
+  const onDisk = readJournalChain(path);
+  assert.deepEqual(onDisk.map((entry) => entry.seq), [2]);
+  // Entries 0 and 1 never reached disk. Renumbering would hide that; naming the
+  // gap is the honest reading, and `verify` does exactly that.
+  assert.deepEqual(verifyChain(onDisk), { ok: false, brokenAt: 0 });
+});

@@ -93,7 +93,9 @@ function readPolicy() {
   try {
     return loadPolicy();
   } catch (error) {
-    throw new Error(`cannot read the policy file: ${String(error?.message ?? error)}`);
+    // Name the file: with XDG_CONFIG_HOME or BLACKOUT_HOME in play, the message
+    // is the only thing that says which config.json needs fixing.
+    throw new Error(`cannot read ${policyPath()}: ${String(error?.message ?? error)}`);
   }
 }
 

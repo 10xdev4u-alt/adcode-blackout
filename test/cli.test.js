@@ -550,3 +550,18 @@ test("compat refuses a window outside its bounds before launching anything", asy
   assert.equal(result.status, 2);
   assert.match(result.stderr, /between 1 and 3600/);
 });
+
+test("a broken config names the file and refuses to serve", async () => {
+  const { home } = await setup(18796);
+  writeFileSync(join(home, ".config", "blackout", "config.json"), "{not json");
+
+  const status = run(home, ["status"]);
+  assert.equal(status.status, 1);
+  assert.match(status.stderr, /config\.json/);
+
+  // Refusing is the whole behaviour: nothing may start on the port.
+  const serve = run(home, ["serve", "--foreground", "--port", "18796"]);
+  assert.equal(serve.status, 1);
+  assert.match(serve.stderr, /config\.json/);
+  assert.equal(await portFree(18796), true);
+});

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import { mkdtemp } from "node:fs/promises";
 import { mkdirSync, rmSync } from "node:fs";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProxy } from "../src/proxy.js";
@@ -16,21 +17,33 @@ let upstreamOrigin;
 let hits;
 let seenConfigAuth = null;
 
+/**
+ * The upstream fixture, named so a test can restore it.
+ *
+ * One test has to take the upstream away to test a 502; rebuilding it with the
+ * same handler is what keeps every test after it honest. A stand-in that only
+ * answers `{}` silently changes what all of them are measuring.
+ */
+function handleUpstream(req, res) {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    if (req.url === "/v1/serve") { hits.serve++; res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ creatives: [] })); return; }
+    if (req.url === "/v1/receipts") { hits.receipts++; res.writeHead(200); res.end("{}"); return; }
+    if (req.url === "/v1/config") { hits.config++; seenConfigAuth = req.headers.authorization ?? null; res.writeHead(200); res.end(JSON.stringify({ killSwitch: false, caps: { dailyCap: 40, minIntervalMs: 1000 }, projections: { off: "0", light: "10", standard: "20", max: "30" }, extra: "ignored" })); return; }
+    if (req.url === "/v1/balance") { hits.balance++; res.writeHead(200, { "content-type": "application/json", "x-upstream": "yes" }); res.end(JSON.stringify({ availableMicros: "1080000", lifetimeMicros: "5400000" })); return; }
+    // Byte-exact and pre-compressed payloads: the "piped byte for byte" claim.
+    if (req.url === "/v1/binary") { res.writeHead(200, { "content-type": "application/octet-stream", etag: '"abc"' }); res.end(Buffer.from([0, 1, 2, 3, 255, 254])); return; }
+    if (req.url === "/v1/gzip") { res.writeHead(200, { "content-type": "text/plain", "content-encoding": "gzip" }); res.end(gzipSync(Buffer.from("hello hello hello"))); return; }
+    hits.other++;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ method: req.method, url: req.url, body: body || null, auth: req.headers.authorization ?? null }));
+  });
+}
+
 before(async () => {
   hits = { serve: 0, receipts: 0, config: 0, balance: 0, other: 0 };
-  upstream = createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", () => {
-      if (req.url === "/v1/serve") { hits.serve++; res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ creatives: [] })); return; }
-      if (req.url === "/v1/receipts") { hits.receipts++; res.writeHead(200); res.end("{}"); return; }
-      if (req.url === "/v1/config") { hits.config++; seenConfigAuth = req.headers.authorization ?? null; res.writeHead(200); res.end(JSON.stringify({ killSwitch: false, caps: { dailyCap: 40, minIntervalMs: 1000 }, projections: { off: "0", light: "10", standard: "20", max: "30" }, extra: "ignored" })); return; }
-      if (req.url === "/v1/balance") { hits.balance++; res.writeHead(200, { "content-type": "application/json", "x-upstream": "yes" }); res.end(JSON.stringify({ availableMicros: "1080000", lifetimeMicros: "5400000" })); return; }
-      hits.other++;
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ method: req.method, url: req.url, body: body || null, auth: req.headers.authorization ?? null }));
-    });
-  });
+  upstream = createServer(handleUpstream);
   await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
   upstreamOrigin = `http://127.0.0.1:${upstream.address().port}`;
 });
@@ -273,11 +286,131 @@ test("an unreachable upstream is a 502 with a journal entry", async () => {
   assert.equal(res.status, 502);
   assert.deepEqual(await res.json(), { error: "upstream-unreachable" });
   assert.ok(journal.entries.some((e) => e.kind === "upstream-error"));
-  upstream = createServer((req, res) => res.end("{}"));
+  upstream = createServer(handleUpstream);
   await new Promise((resolve) => upstream.listen(Number(new URL(upstreamOrigin).port), "127.0.0.1", resolve));
 });
 
 test("a body over the limit is refused rather than buffered", async () => {
   const res = await fetch(`${proxy.url}/v1/receipts`, { method: "POST", body: "x".repeat(2 * 1024 * 1024 + 1) });
   assert.equal(res.status, 413);
+});
+
+test("a large serve body is consumed, so the connection can be reused", async () => {
+  // The client posts its context with the serve call. If the proxy answers
+  // without reading that body, Node destroys the socket afterwards: every
+  // request costs a new connection, and a response can be cut off mid-flight.
+  const { Agent } = await import("node:http");
+  const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+  const body = "x".repeat(8 * 1024 * 1024);
+
+  const post = () => new Promise((resolve, reject) => {
+    const req = httpRequest({ host: "127.0.0.1", port: proxy.server.address().port, path: "/v1/serve", method: "POST", agent, headers: { "content-length": body.length } }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode, reused: req.reusedSocket }));
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+
+  try {
+    const first = await post();
+    const second = await post();
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.reused, true, "the second request should reuse the connection");
+  } finally {
+    agent.destroy();
+  }
+});
+
+test("a client that never finishes its body cannot hold the answer forever", async () => {
+  const started = Date.now();
+  const status = await new Promise((resolve, reject) => {
+    const req = httpRequest({
+      host: "127.0.0.1",
+      port: proxy.server.address().port,
+      path: "/v1/serve",
+      method: "POST",
+      // Promises a body, sends one byte. The proxy waits, but only so long.
+      headers: { "content-length": 1_000_000 },
+    }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode));
+    });
+    req.on("error", reject);
+    req.write("x");
+  });
+
+  assert.equal(status, 200);
+  assert.ok(Date.now() - started < 4_000, `took ${Date.now() - started}ms to answer`);
+});
+
+test("a client that disappears mid-request leaves the proxy serving", async () => {
+  await new Promise((resolve) => {
+    const req = httpRequest({
+      host: "127.0.0.1",
+      port: proxy.server.address().port,
+      path: "/v1/serve",
+      method: "POST",
+      headers: { "content-length": 1_000_000 },
+    });
+    req.on("error", () => resolve());
+    req.write("x");
+    setTimeout(() => { req.destroy(); resolve(); }, 30);
+  });
+
+  const health = await fetch(`${proxy.url}/_blackout/health`);
+  assert.equal(health.status, 200);
+});
+
+test("concurrent serves are all answered, counted and chained", async () => {
+  const before = journal.entries.filter((entry) => entry.kind === "serve-blocked").length;
+  const responses = await Promise.all(
+    Array.from({ length: 100 }, () => fetch(`${proxy.url}/v1/serve`, { method: "POST", body: JSON.stringify({ tags: [] }) })),
+  );
+
+  assert.equal(responses.filter((res) => res.status === 200).length, 100);
+  const after = journal.entries.filter((entry) => entry.kind === "serve-blocked").length;
+  assert.equal(after - before, 100);
+
+  const { verifyChain } = await import("../src/journal.js");
+  assert.deepEqual(verifyChain(journal.entries), { ok: true, brokenAt: null });
+});
+
+test("hostile receipt bodies are refused without touching the queue", async () => {
+  const bodies = ["null", "[]", "{}", '{"receipts":{}}', '{"receipts":"x"}', '{"receipts":[null,1,"x",{}]}'];
+  for (const body of bodies) {
+    const res = await fetch(`${proxy.url}/v1/receipts`, { method: "POST", body });
+    const json = await res.json();
+    if (body === '{"receipts":[null,1,"x",{}]}') {
+      // An array of junk is still an array: nothing is acked, nothing crashes.
+      assert.equal(res.status, 200);
+      assert.deepEqual(json, { acked: [] });
+    } else {
+      assert.equal(res.status, 400, `${body} should be a 400`);
+    }
+  }
+});
+
+const rawGet = (path) => new Promise((resolve, reject) => {
+  const req = httpRequest({ host: "127.0.0.1", port: proxy.server.address().port, path }, (res) => {
+    const chunks = [];
+    res.on("data", (chunk) => chunks.push(chunk));
+    res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+  });
+  req.on("error", reject);
+  req.end();
+});
+
+test("binary responses pass through byte for byte, headers intact", async () => {
+  const { status, headers, body } = await rawGet("/v1/binary");
+  assert.equal(headers["content-type"], "application/octet-stream");
+  assert.equal(headers["etag"], '"abc"');
+  assert.deepEqual([...body], [0, 1, 2, 3, 255, 254]);
+});
+
+test("a pre-compressed response is not decoded, re-encoded or relabelled", async () => {
+  const { headers, body } = await rawGet("/v1/gzip");
+  assert.equal(headers["content-encoding"], "gzip");
+  assert.equal(gunzipSync(body).toString("utf8"), "hello hello hello");
 });
