@@ -83,6 +83,15 @@ Each entry is `{seq, at, kind, data, prev, hash}` where `hash` is SHA-256 over
 else is reported at its index. Subscribers receive entries as they are appended,
 which is what the dashboard's event stream consumes.
 
+The live file rotates at 5 MiB to `journal.0001.jsonl`, then `0002`, and so on.
+Rotation happens after the append that crosses the threshold, so no entry is
+split, and renaming is atomic on one filesystem. The sequence number and `prev`
+continue across files, which means `verify` reads the segments oldest-first and
+checks them as one chain; tampering in an old segment is reported at its
+absolute index. Rotation bounds each file, not the total history: at roughly 200
+bytes per decision, 5 MiB is about 25,000 decisions, and a year of ticks is a few
+segments. `blackout verify` and an offline `blackout report` read every segment.
+
 The chain is tamper-evident, not tamper-proof. Its value is that a report can
 name a head hash; changing history after that means the published head no longer
 matches.

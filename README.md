@@ -130,9 +130,13 @@ cannot hit it with a form post.
 
 - Upstream down: pass-through features degrade, ads stay blocked. `/v1/config`
   falls back to `killSwitch: true`, `dailyCap: 0`.
-- Journal tampered with: `verify` reports the first broken link. The chain is a
-  detector, not a preventer - anyone with write access can rewrite the whole
-  file, but not keep the head hash you already published.
+- Journal tampered with: `verify` reports the first broken link, including a
+  link in an older rotated segment. The chain is a detector, not a preventer -
+  anyone with write access can rewrite the whole file, but not keep the head
+  hash you already published.
+- Journal grows: the live file rotates at 5 MiB into numbered segments, and
+  `verify` checks across them. Each file is bounded; the total is not, because
+  deleting history would defeat the point. Plan on a few segments per year.
 - Port 8790 busy: `launch` warns and starts ADCode unprotected rather than
   refusing to start it. `doctor` names the pid and command that hold the port
   on Linux, and says "not running" where it cannot know.

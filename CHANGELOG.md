@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The journal now rotates at 5 MiB into `journal.0001.jsonl`, `0002`, ... with
+  the hash chain continuing across files. `verify` and an offline report read
+  every segment and name a tampered entry by its absolute index.
+
 ## 0.2.0 - 2026-10-22
 
 Diagnostics and lifecycle, after the first end-to-end run against the stock
