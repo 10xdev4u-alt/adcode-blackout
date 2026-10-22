@@ -454,7 +454,14 @@ async function commandEvents(values) {
   process.on("SIGTERM", stop);
 
   try {
-    const response = await fetch(url, { signal: controller.signal, headers: { accept: "text/event-stream" } });
+    let response;
+    try {
+      response = await fetch(url, { signal: controller.signal, headers: { accept: "text/event-stream" } });
+    } catch {
+      // "fetch failed" names neither the address nor the fix. A refused
+      // connection here has one cause worth naming.
+      return fail(`proxy is not running at ${proxyUrl(policy)}`);
+    }
     if (!response.ok || response.body === null) return fail(`proxy is not running at ${proxyUrl(policy)}`);
 
     const reader = response.body.getReader();
