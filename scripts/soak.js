@@ -128,7 +128,7 @@ while (Date.now() - startedAt < seconds * 1_000) {
   await sleep(Math.min(interval, 25));
   if (samples.length < Math.floor((Date.now() - startedAt) / 1_000)) {
     const usage = process.memoryUsage();
-    samples.push({ rss: usage.rss, heapUsed: usage.heapUsed, fds: descriptors() });
+    samples.push({ rss: usage.rss, heapUsed: usage.heapUsed, heapTotal: usage.heapTotal, external: usage.external, arrayBuffers: usage.arrayBuffers, fds: descriptors() });
   }
 }
 
@@ -141,6 +141,7 @@ await sleep(5_000);
 
 const missed = Math.floor((Date.now() - startedAt) / interval) - tick;
 const settled = process.memoryUsage();
+const settledDetail = { heapTotal: settled.heapTotal, external: settled.external, arrayBuffers: settled.arrayBuffers };
 const after = { rss: settled.rss, heapUsed: settled.heapUsed, fds: descriptors() };
 await proxy.close();
 await new Promise((resolve) => upstream.close(resolve));
@@ -161,11 +162,12 @@ const fdGrowth = (after.fds ?? 0) - (before.fds ?? 0);
 const midpoint = samples[Math.floor(samples.length / 2)] ?? null;
 const secondHalfHeapGrowth = midpoint === null ? 0 : after.heapUsed - midpoint.heapUsed;
 
-const blocked = journal.entries.filter((entry) => entry.kind === "serve-blocked").length;
-const acked = journal.entries
-  .filter((entry) => entry.kind === "receipt-blocked")
-  .reduce((total, entry) => total + (entry.data?.count ?? 0), 0);
-const rewritten = journal.entries.filter((entry) => entry.kind === "config-rewritten").length;
+// Totals from the journal's counters, not from the retained tail: the point of
+// the tail is that it stops growing, so counting it would undercount the run.
+const totals = journal.summary();
+const blocked = totals.counts["serve-blocked"] ?? 0;
+const acked = totals.receipts;
+const rewritten = totals.counts["config-rewritten"] ?? 0;
 
 const problems = [...failures.slice(0, 5)];
 if (failures.length > 5) problems.push(`... and ${failures.length - 5} more`);
@@ -174,6 +176,8 @@ if (blocked !== sent.serve) problems.push(`blocked ${blocked} of ${sent.serve} s
 if (acked !== sent.receipts) problems.push(`acked ${acked} of ${sent.receipts} receipts`);
 if (rewritten !== sent.config) problems.push(`rewrote ${rewritten} of ${sent.config} configs`);
 if (secondHalfHeapGrowth > MAX_SECOND_HALF_HEAP_BYTES) problems.push(`heap kept growing in the second half: ${(secondHalfHeapGrowth / 1024 / 1024).toFixed(1)} MiB`);
+if (totals.total !== totals.retained && journal.entries.length > 6_000) problems.push(`journal retained ${journal.entries.length} entries`);
+if (totals.total !== onDisk.length) problems.push(`journal counted ${totals.total} but wrote ${onDisk.length}`);
 if (fdGrowth > MAX_FD_GROWTH) problems.push(`descriptors grew by ${fdGrowth}`);
 const achievedRate = tick / ((Date.now() - startedAt) / 1_000);
 if (achievedRate < rate * 0.8) problems.push(`only ${achievedRate.toFixed(1)} of ${rate}/s achieved`);
@@ -181,12 +185,13 @@ if (achievedRate < rate * 0.8) problems.push(`only ${achievedRate.toFixed(1)} of
 const summary = {
   seconds: elapsed,
   requests: sent,
-  decisions: { blocked, acked, rewritten, entries: journal.entries.length, onDisk: onDisk.length, segments: journal.segments.length },
+  decisions: { blocked, acked, rewritten, entries: totals.total, retained: journal.entries.length, onDisk: onDisk.length, segments: journal.segments.length },
   rssMiB: { start: Number((before.rss / 1024 / 1024).toFixed(1)), peak: Number((peakRss / 1024 / 1024).toFixed(1)), growth: Number((rssGrowth / 1024 / 1024).toFixed(1)) },
+  detailMiB: { heapTotal: Math.round(settledDetail.heapTotal / 1048576), external: Math.round(settledDetail.external / 1048576), arrayBuffers: Math.round(settledDetail.arrayBuffers / 1048576) },
   heapMiB: { start: Number((before.heapUsed / 1024 / 1024).toFixed(1)), end: Number((after.heapUsed / 1024 / 1024).toFixed(1)), secondHalf: Number((secondHalfHeapGrowth / 1024 / 1024).toFixed(1)) },
   missed,
   achievedRate: Number((tick / ((Date.now() - startedAt) / 1_000)).toFixed(1)),
-  samples: samples.map((sample) => ({ rss: Math.round(sample.rss / 1048576), heap: Math.round(sample.heapUsed / 1048576), fds: sample.fds })),
+  samples: samples.map((sample) => ({ rss: Math.round(sample.rss / 1048576), heap: Math.round(sample.heapUsed / 1048576), total: Math.round(sample.heapTotal / 1048576), ext: Math.round(sample.external / 1048576), bufs: Math.round(sample.arrayBuffers / 1048576), fds: sample.fds })),
   fds: { start: before.fds, peak: peakFds, growth: fdGrowth },
   ok: problems.length === 0,
   problems,
@@ -197,12 +202,15 @@ if (json) {
 } else {
   console.log(`soak ${summary.seconds.toFixed(1)}s at ${rate}/s`);
   console.log(`requests   ${sent.serve} serve, ${sent.receipts} receipts, ${sent.config} config, ${sent.chat} chat`);
-  console.log(`decisions  ${blocked} blocked, ${acked} acked, ${rewritten} rewritten (${journal.entries.length} in memory, ${onDisk.length} on disk, ${journal.segments.length} segment(s))`);
+  console.log(`decisions  ${blocked} blocked, ${acked} acked, ${rewritten} rewritten (${totals.total} total, ${journal.entries.length} retained, ${onDisk.length} on disk, ${journal.segments.length} segment(s))`);
   // RSS is reported, not judged: V8 reserves heap and does not hand it back, so
   // a growing RSS during warm-up is normal. A real leak shows up as heap that
   // keeps climbing in the second half, and that is what fails the run.
   console.log(`memory     ${summary.rssMiB.start} MiB -> peak ${summary.rssMiB.peak} MiB (reserved, not judged)`);
-  console.log(`heap       ${summary.heapMiB.start} MiB -> ${summary.heapMiB.end} MiB (second half ${summary.heapMiB.secondHalf >= 0 ? "+" : ""}${summary.heapMiB.secondHalf})`);
+  // Used *and* reserved: V8 grows the reservation while the load ramps, then
+  // plateaus. A reservation that keeps climbing is the shape of a leak; the
+  // used figure alone just shows the GC sawtooth.
+  console.log(`heap       ${summary.heapMiB.start} MiB -> ${summary.heapMiB.end} MiB used of ${summary.detailMiB.heapTotal} MiB reserved (second half ${summary.heapMiB.secondHalf >= 0 ? "+" : ""}${summary.heapMiB.secondHalf})`);
   console.log(`fds        ${before.fds} -> peak ${peakFds}, settled ${after.fds}`);
   console.log(`chain      ${chain.ok ? "ok" : `BROKEN at ${chain.brokenAt}`}`);
   for (const problem of problems) console.log(`  ! ${problem}`);

@@ -25,6 +25,15 @@ const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "p
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const BODY_LIMIT = 2 * 1024 * 1024;
 const CONFIG_TIMEOUT_MS = 8_000;
+/**
+ * How far a client may fall behind on the decision stream.
+ *
+ * `res.write` returns false when the socket is full, and ignoring that turns a
+ * paused reader - a suspended browser tab, a `SIGSTOP`ped CLI - into a buffer
+ * that grows with every decision. Measured before this limit existed: a stalled
+ * subscriber cost about 12 MiB per 10 MiB of journal traffic, forever.
+ */
+const STREAM_LIMIT_BYTES = 256 * 1024;
 /** The client rejects an ack outside this shape, so never send one. */
 const ACKABLE = /^[A-Za-z0-9_-]{1,64}$/;
 /** Paths that look like advertising, for discovery only. */
@@ -108,6 +117,10 @@ function drain(req, { timeoutMs = 2_000 } = {}) {
 }
 
 function sendJson(res, status, body, extra = {}) {
+  // The client can be gone by the time an answer is ready - it aborted during a
+  // drain, or while the upstream was being fetched. Writing to that response is
+  // at best wasted and at worst an error event nothing is listening for.
+  if (res.destroyed || res.writableEnded) return;
   const text = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -150,6 +163,10 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       version: VERSION,
       now: now(),
       enabled,
+      // Totals come from the journal's own counters: `journal.entries` is a
+      // bounded tail, so counting it would shrink as the proxy got busier.
+      summary: typeof journal.summary === "function" ? journal.summary() : null,
+      integrity: journal.integrity,
       // A journal that cannot be written is not a reason to stop blocking, but it
       // is a reason to stop claiming the record is complete.
       journalWriteError: journal.writeError ?? null,
@@ -288,9 +305,10 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       return;
     }
     const request = target.protocol === "https:" ? httpsRequest : httpRequest;
+    const controller = new AbortController();
     // No shared agent: a pooled socket would outlive the request and make shutdown
     // wait on a connection nobody is using.
-    const upstream = request(target, { method: req.method, headers: upstreamHeaders(req), agent: false }, (response) => {
+    const upstream = request(target, { method: req.method, headers: upstreamHeaders(req), agent: false, signal: controller.signal }, (response) => {
       if (res.destroyed) {
         response.destroy();
         return;
@@ -305,12 +323,32 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
     });
 
     upstream.on("error", (error) => {
-      journal.append("upstream-error", { path: url.pathname, reason: String(error?.message ?? error) });
+      // An abort we caused is not an upstream fault, and journaling it would
+      // turn every cancelled request into an entry the report cannot explain.
+      if (!controller.signal.aborted) {
+        journal.append("upstream-error", { path: url.pathname, reason: String(error?.message ?? error) });
+      }
       if (!res.headersSent) sendJson(res, 502, { error: "upstream-unreachable" });
-      else res.destroy();
+      else if (!res.destroyed) res.destroy();
     });
 
-    req.on("aborted", () => upstream.destroy());
+    /*
+     * The client hanging up must close the upstream side.
+     *
+     * `req.pipe(upstream)` alone does not do this: when the socket goes away the
+     * request is destroyed, but the outgoing request keeps its socket open. A
+     * stalled upstream then holds one descriptor and one request object per
+     * abandoned call, and never errors, so nothing else cleans it up. Measured
+     * before this: 40 cancelled calls, 40 upstream sockets still open.
+     */
+    res.on("close", () => {
+      // A finished response also closes the connection; only an unfinished one
+      // means the client gave up before it had its answer.
+      if (res.writableFinished) return;
+      req.unpipe(upstream);
+      controller.abort();
+      upstream.destroy();
+    });
     req.pipe(upstream);
   }
 
@@ -362,15 +400,38 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       for (const entry of journal.entries.slice(-20)) {
         res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
       }
+      let timer = null;
+      let live = true;
       const unsubscribe = journal.subscribe((entry) => {
-        if (!res.writableEnded) res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
+        if (!live || res.writableEnded) return;
+        if (res.writableLength > STREAM_LIMIT_BYTES) {
+          // End the stream rather than queue for it. The client reconnects on
+          // its own (the first frame is `retry: 3000`) and is replayed the
+          // tail, so a slow reader loses nothing; a buffer that never drains
+          // would cost the whole process.
+          stop();
+          res.destroy();
+          return;
+        }
+        res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
       });
-      const timer = setInterval(() => res.write(": heartbeat\n\n"), 15_000);
-      timer.unref?.();
-      res.on("close", () => {
-        clearInterval(timer);
+      function stop() {
+        if (!live) return;
+        live = false;
         unsubscribe();
-      });
+        if (timer !== null) clearInterval(timer);
+      }
+      timer = setInterval(() => {
+        if (!live) return;
+        if (res.writableLength > STREAM_LIMIT_BYTES) {
+          stop();
+          res.destroy();
+          return;
+        }
+        res.write(": heartbeat\n\n");
+      }, 15_000);
+      timer.unref?.();
+      res.on("close", stop);
       return;
     }
 

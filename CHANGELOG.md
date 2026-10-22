@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Memory no longer grows with the journal. Only the most recent 5,000 decisions
+  are retained; totals are counted as entries arrive, so `report`, `status` and
+  the dashboard still show the whole record. Measured before the change: a soak
+  at 400 decisions/s reached 137 MiB of heap in five minutes and kept climbing.
+- A decision stream subscriber that stops reading is disconnected instead of
+  buffered. A suspended dashboard tab used to collect every later decision in a
+  socket queue that never drained (about 12 MiB per 10 MiB of journal traffic);
+  it is now cut off past 256 KiB of backlog and reconnects to a replayed tail.
+- A pass-through request whose client hangs up now closes the upstream request.
+  `req.pipe()` did not: a stalled upstream never errors, so each cancelled call
+  left a socket and a request object open (40 cancellations, 40 open sockets).
+- An answer that is ready after the client has already gone is dropped instead
+  of written to a destroyed response.
+
 ## 0.4.4 - 2026-10-23
 
 - `npm run soak -- --segment-bytes 8000` forces journal rotation every few

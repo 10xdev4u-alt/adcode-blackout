@@ -92,13 +92,20 @@ absolute index. Rotation bounds each file, not the total history: at roughly 200
 bytes per decision, 5 MiB is about 25,000 decisions, and a year of ticks is a few
 segments. `blackout verify` and an offline `blackout report` read every segment.
 
-The process also keeps every entry it has seen in memory, because the report,
-the dashboard and the event stream read from that list. Rotation bounds the disk
-and not that list, so the bound is the ad rate rather than time: the client asks
-for an inventory a few times a minute at most, which is a few hundred kilobytes
-over a month, and a restart reloads everything the disk still holds. A rate high
-enough to matter would be a different problem - but it is a limit, and the soak
-script reports heap growth for exactly that reason.
+Memory holds the most recent 5,000 entries, not every entry ever made. The
+report, the dashboard and the event stream read from that tail, so the retained
+list has to be long enough to describe "what just happened" and no longer. The
+earlier version kept everything and argued the ad rate was low enough to bound
+it; a 400 decisions/s soak disagreed, growing the heap to 137 MiB in five
+minutes and still climbing. Totals are therefore counted as entries arrive
+(`summary()`), and the report presents `window.entries` (the whole record) next
+to `window.retained` (what memory holds) instead of quietly reporting the tail.
+
+A subscriber that stops reading is cut off rather than queued for. `res.write`
+on a full socket buffers without limit, so a suspended dashboard tab or a
+`SIGSTOP`ped `blackout events` would otherwise convert every later decision into
+heap that is never reclaimed; past 256 KiB of backlog the stream is destroyed
+and the client's own reconnect replays the tail.
 
 A failed write never becomes a failed decision. If the state directory is full
 or read-only, the entry stays in memory, the request is still blocked, and the
@@ -122,6 +129,13 @@ All under `/_blackout/`, never forwarded:
 - `GET /dashboard` - the HTML dashboard (if enabled)
 - `GET /events` - server-sent events, one per journal entry
 - `POST /pause`, `POST /resume` - require `x-blackout-control`
+
+Pass-through ties the two sockets together in both directions. `req.pipe(upstream)`
+alone only closes the outgoing request when the *upstream* fails: a client that
+hangs up mid-call leaves the upstream socket open, and a stalled upstream never
+errors, so nothing cleans it up. `res.on("close")` on an unfinished response
+aborts and destroys the upstream request; without it, 40 cancelled calls left 40
+upstream sockets open.
 
 The proxy binds loopback only. `policy.js` refuses any other host rather than
 clamping it, because a typo in a host is how a local tool becomes a public one.
