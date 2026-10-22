@@ -10,7 +10,8 @@
   "scripts": {
     "test": "node --test",
     "start": "node bin/blackout.js serve",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "soak": "node scripts/soak.js"
   },
   "engines": {
     "node": ">=20"

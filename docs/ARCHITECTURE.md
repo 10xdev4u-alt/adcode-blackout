@@ -92,6 +92,14 @@ absolute index. Rotation bounds each file, not the total history: at roughly 200
 bytes per decision, 5 MiB is about 25,000 decisions, and a year of ticks is a few
 segments. `blackout verify` and an offline `blackout report` read every segment.
 
+The process also keeps every entry it has seen in memory, because the report,
+the dashboard and the event stream read from that list. Rotation bounds the disk
+and not that list, so the bound is the ad rate rather than time: the client asks
+for an inventory a few times a minute at most, which is a few hundred kilobytes
+over a month, and a restart reloads everything the disk still holds. A rate high
+enough to matter would be a different problem - but it is a limit, and the soak
+script reports heap growth for exactly that reason.
+
 A failed write never becomes a failed decision. If the state directory is full
 or read-only, the entry stays in memory, the request is still blocked, and the
 first failure is kept as `{at, message}` and surfaced by `/health`, `status`,

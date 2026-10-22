@@ -28,6 +28,18 @@ and you have the whole development loop.
 
 Run `node scripts/smoke.js` before touching a real install.
 
+For a change to request handling, run the soak as well:
+
+```sh
+node scripts/soak.js --seconds 60 --rate 25
+```
+
+It drives a mixed load (blocked, acked, rewritten and forwarded calls) against
+a proxy in the same process and fails on a broken chain, a counter that drifts
+from what was sent, a descriptor count that does not settle after the run, or a
+heap that keeps growing in the second half. RSS is printed but not judged: V8
+reserves heap and does not give it back, so warm-up growth is not a leak.
+
 ## Rule changes
 
 Rules are data. Adding an endpoint is a `rules/core.json` change plus:
