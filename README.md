@@ -57,6 +57,11 @@ blackout install --desktop    # repoint matching .desktop entries at the launche
 blackout install --autostart  # systemd user unit, so the proxy is always up
 ```
 
+The unit is sandboxed: `StateDirectory=blackout`, `NoNewPrivileges`,
+`PrivateTmp`, `ProtectSystem=strict` and `ProtectHome=read-only`. It needs to
+read the install, write `~/.local/state/blackout` and listen on loopback, and
+nothing else.
+
 Then start the editor through the launcher, not the AppImage directly:
 
 ```sh
