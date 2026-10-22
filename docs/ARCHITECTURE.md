@@ -127,8 +127,15 @@ All under `/_blackout/`, never forwarded:
   only pass-through calls is still visibly talking to us)
 - `GET /report` - the report JSON
 - `GET /dashboard` - the HTML dashboard (if enabled)
-- `GET /events` - server-sent events, one per journal entry
+- `GET /events` - server-sent events, one per journal entry, cut off past 256 KiB
+  of backlog so a reader that stops reading cannot grow the process
 - `POST /pause`, `POST /resume` - require `x-blackout-control`
+
+Discovery is capped at 256 distinct observations (endpoints and rejected Host
+names together), after which one `discovery-capped` entry is written and nothing
+new is recorded. The cap exists because the input is not trusted: a page in a
+browser can POST to loopback with a loopback `Host`, and each novel ad-like path
+would otherwise cost a set entry and a journal line whose size the request picks.
 
 Pass-through ties the two sockets together in both directions. `req.pipe(upstream)`
 alone only closes the outgoing request when the *upstream* fails: a client that

@@ -15,6 +15,10 @@
   left a socket and a request object open (40 cancellations, 40 open sockets).
 - An answer that is ready after the client has already gone is dropped instead
   of written to a destroyed response.
+- Endpoint discovery is capped at 256 distinct observations and says when it
+  stops (`discovery-capped`). Any page can POST to loopback, and every new
+  ad-like path would otherwise cost a set entry and a journal line that the
+  request chooses the size of.
 
 ## 0.4.4 - 2026-10-23
 

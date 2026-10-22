@@ -142,6 +142,19 @@ test("an ad-like path outside the rule pack is recorded once", async () => {
   assert.equal(seen[0].data.path, "/v1/sponsors");
 });
 
+test("discovery stops recording endpoints at a fixed limit", async () => {
+  // Any page can POST to loopback with a loopback Host, and each new ad-like
+  // path would otherwise cost a Set entry and a journal line of its choosing.
+  const before = journal.entries.filter((entry) => entry.kind === "endpoint-seen").length;
+  for (let index = 0; index < 300; index++) await fetch(`${proxy.url}/v1/ads/${index}`);
+  const seen = journal.entries.filter((entry) => entry.kind === "endpoint-seen").length;
+  assert.ok(seen - before <= 256, `recorded ${seen - before} endpoints`);
+  assert.equal(journal.entries.filter((entry) => entry.kind === "discovery-capped").length, 1);
+
+  await fetch(`${proxy.url}/v1/ads/one-more`);
+  assert.equal(journal.entries.filter((entry) => entry.kind === "endpoint-seen").length, seen);
+});
+
 test("setRules swaps the pack without restarting the server", async () => {
   const before = await fetch(`${proxy.url}/v1/extra`, { method: "POST", body: "{}" });
   assert.equal(before.status, 200, "core has no rule for this path, so it passes");
