@@ -565,3 +565,11 @@ test("a broken config names the file and refuses to serve", async () => {
   assert.match(serve.stderr, /config\.json/);
   assert.equal(await portFree(18796), true);
 });
+
+test("events names the address when nothing is listening", async () => {
+  const { home } = await setup(18797);
+  const result = run(home, ["events", "--once"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /proxy is not running at http:\/\/127\.0\.0\.1:18797/);
+  assert.doesNotMatch(result.stderr, /fetch failed/);
+});
