@@ -264,6 +264,22 @@ export async function runCompat({ appImage, args = [], seconds = 60, policy, rul
   }
 }
 
+/**
+ * What to do about a failure, in the line where it is reported.
+ *
+ * A verdict without a next step is a puzzle. Each of these names the thing that
+ * is wrong and the one action that answers it - and for `contact` and `host`,
+ * that action is "report it", because no local change can fix a build that
+ * stopped calling the proxy or started sending a foreign Host.
+ */
+const HINTS = {
+  launch: "The build did not survive the window. Read the app log above; in a container, pass -- --no-sandbox.",
+  contact: "ADCode did not call the proxy. Either the build stopped reading ADCODE_AD_SERVER - a real regression - or it never started; the app log says which.",
+  host: "The build sent a non-loopback Host. The proxy refuses it by design: that is a bug to report, not a rule to add.",
+  drift: "An unclassified ad-like endpoint passed through. Add the narrowest rule that covers it (docs/RULES.md) and reload with SIGHUP - no release needed.",
+  config: "The config response could not be rewritten. A 200 that cannot be parsed means the schema moved; a 401 with dev-token is expected and harmless.",
+};
+
 export function formatCompat(result) {
   const mark = (state) => (state === "ok" ? "ok  " : state === "warn" ? "warn" : "FAIL");
   const lines = [];
@@ -274,10 +290,12 @@ export function formatCompat(result) {
     lines.push("Not proven either way: open the editor, keep it focused, and run again");
     lines.push("with a longer --seconds. Blocking is not confirmed until a /v1/serve is seen.");
   }
-  if (result.verdict === "fail" && result.observed?.endpoints?.length > 0) {
-    lines.push("");
-    lines.push("An unclassified endpoint passed through. Add the narrowest rule that covers it:");
-    lines.push("see docs/RULES.md, then reload with SIGHUP - no release needed.");
+  if (result.verdict === "fail") {
+    const first = result.checks.find((check) => check.state === "fail");
+    if (first !== undefined && HINTS[first.name] !== undefined) {
+      lines.push("");
+      lines.push(HINTS[first.name]);
+    }
   }
   if (result.journalPath !== null && result.journalPath !== undefined) {
     lines.push("");

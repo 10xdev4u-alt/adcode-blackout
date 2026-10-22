@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `blackout compat` prints the next step with a failure, not only the check
+  that failed: what to read, which flag to try, or whether the answer is a rule
+  or a bug report. `docs/COMPATIBILITY.md` has the same table.
+
 ## 0.4.2 - 2026-10-23
 
 - `blackout compat` now stops the app's whole process group when the window

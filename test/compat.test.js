@@ -295,3 +295,20 @@ test("ending the window takes the app's children with it", async () => {
   }
   assert.ok(gone(childPid), `child ${childPid} survived the window`);
 });
+
+test("each failure carries the next step, not just a verdict", () => {
+  const contact = formatCompat(judge({ entries: [], exit: stayed, seconds: 60 }));
+  assert.match(contact, /did not call the proxy/);
+  assert.match(contact, /stopped reading ADCODE_AD_SERVER/);
+
+  const drift = formatCompat(judge({
+    entries: [entry("serve-blocked"), entry("endpoint-seen", { method: "POST", path: "/v1/ads/v2" })],
+    exit: stayed,
+    seconds: 60,
+  }));
+  assert.match(drift, /narrowest rule/);
+  assert.match(drift, /docs\/RULES\.md/);
+
+  const launch = formatCompat(judge({ entries: [], exit: { timedOut: false, code: 7 }, seconds: 60 }));
+  assert.match(launch, /-- --no-sandbox/);
+});

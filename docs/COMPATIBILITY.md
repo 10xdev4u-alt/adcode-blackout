@@ -47,6 +47,17 @@ Arguments after `--` go to the app: `blackout compat -- --no-sandbox` in a
 container, or `xvfb-run -a blackout compat` with no display. Under `xvfb`, GPU
 and zygote errors in the kept app log are normal.
 
+### Reading the checks
+
+| Check | A failure means | What to do |
+| --- | --- | --- |
+| `launch` | the build died or never started | read the kept app log; pass `-- --no-sandbox` in a container |
+| `contact` | nothing reached the proxy | the build stopped reading `ADCODE_AD_SERVER` (report it) or never started (app log) |
+| `host` | a non-loopback `Host` was refused | a bug in the build, not a rule to add |
+| `drift` | an ad-like path passed through | add the narrowest rule and `SIGHUP` |
+| `config` | a 200 that could not be rewritten | the schema moved; a 401 under `dev-token` is expected and harmless |
+| `serve`/`receipts` | `warn`, never a failure | a window without an ad opportunity: rerun longer, editor focused |
+
 The harness uses its own journal in a temp directory and never touches the
 installed state, so it can run while the normal blocker is up.
 
