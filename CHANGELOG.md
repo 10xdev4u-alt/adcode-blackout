@@ -44,6 +44,12 @@
   typo in `team.url` produced `cannot read ...config.json: team.url must be an
   absolute URL` for a feature that does not exist. Removed; unknown keys are
   ignored, as they always were.
+- `blackout events` reconnects after the proxy restarts. The stream advertised
+  `retry: 3000` on the assumption that something would, but the CLI read once
+  and exited - `blackout: terminated`, status 1 - so a follower lost the view at
+  the first update, crash or `systemctl restart`. It now retries every three
+  seconds, says so on stderr, and keeps stdout clean for `--json`; the first
+  connection still fails immediately with the address when nothing is listening.
 - `uninstall` finishes what it can when one step refuses. A launcher the user
   had replaced threw before the AppImage record was forgotten and before the
   summary printed, so the only output was the refusal and the next `launch`

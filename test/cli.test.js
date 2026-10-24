@@ -261,6 +261,62 @@ test("events follows a decision, and --once exits after it", async () => {
   }
 });
 
+test("events follows the proxy across a restart", async () => {
+  // A restart is ordinary: an update, a crash, `systemctl restart`. The follower
+  // used to end there with `blackout: terminated` and exit 1 - while the stream
+  // advertised `retry: 3000` as if something would reconnect.
+  const port = 18813;
+  const { home } = await setup(port);
+  const started = run(home, ["serve", "--detach"]);
+  assert.equal(started.status, 0, started.stderr);
+
+  let out = "";
+  let err = "";
+  const follower = spawn(process.execPath, [CLI, "events"], {
+    env: {
+      ...process.env,
+      HOME: home,
+      BLACKOUT_HOME: join(home, ".config", "blackout"),
+      BLACKOUT_STATE: join(home, ".local", "state", "blackout"),
+    },
+  });
+  follower.stdout.on("data", (chunk) => { out += chunk; });
+  follower.stderr.on("data", (chunk) => { err += chunk; });
+
+  const answering = async () => {
+    try {
+      return (await fetch(`http://127.0.0.1:${port}/_blackout/health`, { signal: AbortSignal.timeout(200) })).ok;
+    } catch {
+      return false;
+    }
+  };
+  const decide = () => fetch(`http://127.0.0.1:${port}/v1/serve`, { method: "POST", body: "{}" });
+
+  try {
+    assert.equal(await waitFor(answering), true, "the proxy should be up");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await decide();
+    assert.equal(await waitFor(async () => /serve-blocked/.test(out)), true, `no first decision in ${JSON.stringify(out)}`);
+
+    stopProxy(home);
+    assert.equal(await waitFor(async () => !(await answering())), true, "the proxy should be gone");
+    assert.equal(follower.exitCode, null, "the follower should still be running");
+
+    const restarted = run(home, ["serve", "--detach"]);
+    assert.equal(restarted.status, 0, restarted.stderr);
+    assert.equal(await waitFor(answering), true);
+    await decide();
+
+    // The retry is every three seconds.
+    assert.equal(await waitFor(async () => /reconnecting/.test(err), 8_000), true, `no reconnect notice in ${JSON.stringify(err)}`);
+    assert.equal(await waitFor(async () => (out.match(/serve-blocked/g) ?? []).length >= 2, 8_000), true, `no second decision in ${JSON.stringify(out)}`);
+  } finally {
+    follower.kill("SIGKILL");
+    await new Promise((resolve) => follower.once("exit", resolve));
+    stopProxy(home);
+  }
+});
+
 test("a read-only config directory does not stop the editor", { skip: process.platform === "win32" }, async () => {
   const port = 18808;
   const { home, app, out } = await setup(port);
