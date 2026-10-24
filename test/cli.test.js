@@ -281,6 +281,79 @@ test("uninstall stops the proxy it started", async () => {
   }
 });
 
+test("uninstall stops the proxy, not the process a stale pid file names", { skip: process.platform !== "linux" }, async () => {
+  const port = 18804;
+  const { home } = await setup(port);
+  let bystander;
+  try {
+    const serving = runAsync(home, ["serve", "--foreground", "--port", String(port)]);
+    assert.equal(await waitFor(async () => {
+      try {
+        return (await fetch(`http://127.0.0.1:${port}/_blackout/health`, { signal: AbortSignal.timeout(200) })).ok;
+      } catch {
+        return false;
+      }
+    }), true, "the proxy never came up");
+
+    // A pid file that survived a reboot can name anything. This one names a
+    // reader of the tool's own log - a command line that contains "blackout"
+    // and would have been killed by a substring test.
+    const log = join(home, ".local", "state", "blackout", "blackout.log");
+    writeFileSync(log, "log\n");
+    bystander = spawn("tail", ["-f", log], { stdio: "ignore" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    writeFileSync(join(home, ".local", "state", "blackout", "blackout.pid"), `${bystander.pid}\n`);
+
+    const removed = run(home, ["uninstall"]);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.ok(!removed.stdout.includes(`stopped pid ${bystander.pid}`), removed.stdout);
+    assert.match(removed.stdout, /stopped pid \d+ \(ignored a stale pid/);
+    assert.equal(bystander.exitCode, null, "the bystander must still be running");
+    assert.equal(bystander.signalCode, null, `the bystander was killed by ${bystander.signalCode}`);
+
+    assert.equal(await waitFor(async () => {
+      try {
+        await fetch(`http://127.0.0.1:${port}/_blackout/health`, { signal: AbortSignal.timeout(200) });
+        return false;
+      } catch {
+        return true;
+      }
+    }), true, "the proxy it started is still answering");
+    await withTimeout(serving.exited, 5_000, serving.child);
+  } finally {
+    if (bystander && bystander.exitCode === null && bystander.signalCode === null) bystander.kill("SIGKILL");
+    stopProxy(home);
+  }
+});
+
+test("uninstall refuses to purge while a proxy it cannot prove is still serving", { skip: process.platform !== "linux" }, async () => {
+  const port = 18806;
+  const { home } = await setup(port);
+  // Answers the health path, so it looks running, but it is not the proxy: no
+  // pid file names it and it is not a blackout process. It runs in a child
+  // because `run` blocks this event loop, and a server here could not answer.
+  const blocker = spawn(process.execPath, ["-e", `require("node:http").createServer((req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ ok: true })); }).listen(${port}, "127.0.0.1")`], { stdio: "ignore" });
+  try {
+    assert.equal(await waitFor(async () => {
+      try {
+        return (await fetch(`http://127.0.0.1:${port}/_blackout/health`, { signal: AbortSignal.timeout(200) })).ok;
+      } catch {
+        return false;
+      }
+    }), true, "the stand-in listener never came up");
+    mkdirSync(join(home, ".local", "state", "blackout"), { recursive: true });
+    writeFileSync(join(home, ".local", "state", "blackout", "journal.jsonl"), "{\n");
+
+    const result = run(home, ["uninstall", "--purge"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /not started by blackout/);
+    assert.match(result.stdout, /data\s+kept:/);
+    assert.ok(existsSync(join(home, ".local", "state", "blackout", "journal.jsonl")), "nothing was deleted under a live listener");
+  } finally {
+    if (blocker.exitCode === null && blocker.signalCode === null) blocker.kill("SIGKILL");
+  }
+});
+
 test("purge refuses to follow a symlink out of the state directory", async () => {
   const { home } = await setup(18800);
   const target = join(home, "outside.txt");
