@@ -128,7 +128,10 @@ All under `/_blackout/`, never forwarded:
 - `GET /report` - the report JSON
 - `GET /dashboard` - the HTML dashboard (if enabled)
 - `GET /events` - server-sent events, one per journal entry, cut off past 256 KiB
-  of backlog so a reader that stops reading cannot grow the process
+  of backlog so a reader that stops reading cannot grow the process. The last 20
+  entries are replayed to a new subscriber; `?tail=N` narrows that (`0` replays
+  nothing), which is how `blackout events --once` gets one entry - the latest, or
+  the next one if there is no history
 - `POST /pause`, `POST /resume` - require `x-blackout-control`
 
 Discovery is capped at 256 distinct observations (endpoints and rejected Host

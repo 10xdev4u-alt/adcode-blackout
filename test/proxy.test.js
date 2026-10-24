@@ -293,6 +293,32 @@ test("the event stream sends the journal as it happens", async () => {
   ac.abort();
 });
 
+test("the replay can be narrowed to one entry, or none", async () => {
+  for (let i = 0; i < 3; i++) journal.append("probe", { i });
+
+  const newest = new AbortController();
+  const one = await fetch(`${proxy.url}/_blackout/events?tail=1`, { signal: newest.signal });
+  const reader = one.body.getReader();
+  let text = "";
+  for (let reads = 0; reads < 5 && !text.includes("data: "); reads++) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    text += new TextDecoder().decode(chunk.value);
+  }
+  assert.match(text, /"i":2/, "the single replayed entry is the latest");
+  assert.doesNotMatch(text, /"i":1,/);
+  assert.doesNotMatch(text, /"i":0,/);
+  newest.abort();
+
+  // `slice(-0)` is the whole array, so zero has to be handled before slicing.
+  const noneAbort = new AbortController();
+  const none = await fetch(`${proxy.url}/_blackout/events?tail=0`, { signal: noneAbort.signal });
+  const noneReader = none.body.getReader();
+  text = new TextDecoder().decode((await noneReader.read()).value);
+  assert.equal(text.trim(), "retry: 3000", "only the retry hint, no history");
+  noneAbort.abort();
+});
+
 test("a subscriber that stops reading is cut off, not buffered forever", async () => {
   // The dashboard and `blackout events` both read this stream. A suspended tab
   // sends nothing and closes nothing, so an unchecked `res.write` on a full

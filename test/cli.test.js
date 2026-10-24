@@ -247,13 +247,22 @@ test("events follows a decision, and --once exits after it", async () => {
     assert.equal(entry.kind, "serve-blocked");
     assert.equal(entry.data.path, "/v1/serve");
     assert.equal(entry.data.rule, "serve-v1");
+
+    // With history on disk, `--once` answers immediately with the newest entry.
+    // It used to print the oldest of the replayed 20, so a script asking for
+    // "the next decision" got one from before it started.
+    await fetch("http://127.0.0.1:18805/v1/serve", { method: "POST", body: "{}" });
+    const latest = runAsync(home, ["events", "--once", "--json"]);
+    const after = await withTimeout(latest.exited, 5_000, latest.child);
+    assert.equal(after.code, 0, after.stderr);
+    assert.equal(JSON.parse(after.stdout.trim().split("\n").at(-1)).seq, entry.seq + 1);
   } finally {
     stopProxy(home);
   }
 });
 
 test("a read-only config directory does not stop the editor", { skip: process.platform === "win32" }, async () => {
-  const port = 18805;
+  const port = 18808;
   const { home, app, out } = await setup(port);
   const configDir = join(home, ".config", "blackout");
   chmodSync(configDir, 0o500);

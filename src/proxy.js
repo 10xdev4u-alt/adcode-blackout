@@ -55,6 +55,13 @@ const ACKABLE = /^[A-Za-z0-9_-]{1,64}$/;
  * chooses the size of. Measured before the cap: 5,000 distinct paths, 2 KB each.
  */
 const MAX_DISCOVERY = 256;
+/**
+ * How many recent decisions a new subscriber is replayed.
+ *
+ * A follower wants the context of what just happened; `?tail=N` narrows it for
+ * a caller that wants one entry, which is what `blackout events --once` is.
+ */
+const REPLAY_ENTRIES = 20;
 
 /** Paths that look like advertising, for discovery only. */
 const AD_LIKE = /(?:^|\/)(ad|ads|advert|adverts|advertising|serve|serves|receipt|receipts|impression|impressions|sponsor|sponsors|sponsored|promo|promos|promotion|promotions|offer|offers|bid|bids|auction|auctions|campaign|campaigns|creative|creatives)(?:\/|$)/i;
@@ -444,7 +451,15 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
         connection: "keep-alive",
       });
       res.write("retry: 3000\n\n");
-      for (const entry of journal.entries.slice(-20)) {
+      /*
+       * `?tail=N` bounds the replay. Without it, `--once` printed the oldest of
+       * the last 20 rather than the latest - or the next - decision, which is
+       * what a script asking for one entry means. `slice(-0)` is the whole
+       * array, so zero is handled before slicing.
+       */
+      const requested = url.searchParams.has("tail") ? Number(url.searchParams.get("tail")) : REPLAY_ENTRIES;
+      const replay = Number.isSafeInteger(requested) && requested >= 0 ? Math.min(requested, REPLAY_ENTRIES) : REPLAY_ENTRIES;
+      for (const entry of replay === 0 ? [] : journal.entries.slice(-replay)) {
         res.write(`event: journal\ndata: ${JSON.stringify(entry)}\n\n`);
       }
       let timer = null;

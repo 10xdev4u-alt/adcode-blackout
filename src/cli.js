@@ -500,11 +500,15 @@ function eventLine(entry) {
  * This talks to the proxy, not to the journal file, so it sees entries even
  * while another process holds the file and it shares the dashboard's transport.
  * `--once` exists because a human is not the only caller: a script that wants
- * "the next decision" should not need a timeout and a kill.
+ * "the next decision" should not need a timeout and a kill. It asks for a
+ * one-entry tail, so it prints the latest decision - or waits for the next one
+ * when there is no history. The default replay is 20 entries, whose *first* was
+ * what a script used to get: an old decision, immediately, and nothing to say
+ * which.
  */
 async function commandEvents(values) {
   const policy = readPolicy();
-  const url = `${proxyUrl(policy)}/_blackout/events`;
+  const url = `${proxyUrl(policy)}/_blackout/events${values.once ? "?tail=1" : ""}`;
   const controller = new AbortController();
   const stop = () => controller.abort();
   process.on("SIGINT", stop);
