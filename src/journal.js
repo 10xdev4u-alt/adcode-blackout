@@ -11,7 +11,7 @@
  * head hash the report already published.
  */
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 export const GENESIS = "0".repeat(64);
@@ -56,6 +56,43 @@ function segmentNames(filePath) {
 }
 
 /**
+ * Drop a half-written last line so the next append cannot land on top of it.
+ *
+ * Surviving a crash is not enough on its own. A truncated line is ignored by
+ * `readJournal`, but it is still in the file; the next entry is appended after
+ * it with no newline in between, so the two become one unparseable line. A
+ * second decision after that puts a broken line in the middle of the file,
+ * where the truncation tolerance no longer applies and the journal stops
+ * loading altogether - the proxy refuses to start, and `verify` and `report`
+ * throw. Measured before this: two decisions after a torn write were enough.
+ *
+ * A tail that does parse is kept and simply terminated: it is a whole entry
+ * that lost its newline, and dropping it would discard a real decision.
+ */
+function repairTornTail(filePath) {
+  let text;
+  try {
+    text = readFileSync(filePath, "utf8");
+  } catch {
+    return;
+  }
+  if (text.length === 0 || text.endsWith("\n")) return;
+  const cut = text.lastIndexOf("\n") + 1;
+  try {
+    JSON.parse(text.slice(cut));
+    appendFileSync(filePath, "\n");
+    return;
+  } catch {
+    // Not an entry, so there is nothing here to keep.
+  }
+  try {
+    truncateSync(filePath, Buffer.byteLength(text.slice(0, cut), "utf8"));
+  } catch {
+    // Unwritable is not fatal: the append that follows reports the failure.
+  }
+}
+
+/**
  * Every entry on disk, oldest first: rotated segments, then the live file.
  *
  * Rotation keeps the chain intact because the first entry of a new file points
@@ -85,9 +122,9 @@ function digest(entry) {
  * Open a journal, resuming the chain when the file already exists.
  *
  * A crash can leave a truncated last line. That is tolerated by dropping the
- * partial tail, because a half-written line is not evidence of anything. A
- * genuinely broken chain is not repaired: it is reported, so the record keeps
- * its meaning.
+ * partial tail, and the fragment is removed from the file before anything else
+ * is written (see `repairTornTail`). A genuinely broken chain is not repaired:
+ * it is reported, so the record keeps its meaning.
  */
 export function createJournal(filePath = null, { maxBytes = DEFAULT_MAX_BYTES, retainEntries = DEFAULT_RETAINED_ENTRIES } = {}) {
   if (!Number.isSafeInteger(retainEntries) || retainEntries < 1) {
@@ -136,6 +173,9 @@ export function createJournal(filePath = null, { maxBytes = DEFAULT_MAX_BYTES, r
   }
 
   if (filePath !== null) {
+    // Before the chain is read, so the file that is resumed from is the file
+    // that will be appended to.
+    repairTornTail(filePath);
     const loaded = readJournalChain(filePath);
     for (const entry of loaded) remember(entry);
     entries.push(...loaded);

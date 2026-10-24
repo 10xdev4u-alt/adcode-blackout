@@ -25,6 +25,13 @@
 - `blackout report` reaches its on-disk fallback again. `fetch` rejecting on a
   refused connection made the command print `fetch failed` instead of the
   journal's report, so the fallback was unreachable whenever it was needed.
+- A crash mid-write no longer bricks the journal. The truncated last line was
+  tolerated by the reader but left in the file, so the next decision was
+  appended onto it and produced one unparseable line; a second decision then put
+  that line in the middle of the file, where the tolerance does not apply. From
+  there `serve` refused to start and `verify` and `report` threw. The fragment
+  is now removed from the file before anything is written to it, in the same
+  open that resumes the chain.
 - A launcher that cannot spawn the proxy (out of descriptors, for example) now
   warns and starts the editor. The unhandled `error` event from `spawn` threw in
   the launcher, which cost the editor over a blocker the person could not see.
