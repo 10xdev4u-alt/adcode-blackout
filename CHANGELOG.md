@@ -44,6 +44,11 @@
   observed, and the runner resolved a real exit as `{ code, signal }` without
   that flag, so `undefined === false` dropped it and only the unit test - which
   passed the flag itself - ever saw it. An observed exit is now marked.
+- `blackout launch` starts the editor when `~/.config` or the state directory
+  is read-only or full. Recording the AppImage path threw EACCES before the
+  editor was considered, and a failure to open the proxy's log file escaped
+  `ensureProxy` the same way, so a filesystem problem cost the editor over a
+  blocker. Both are warnings now; only the editor failing to start is an error.
 - A launcher that cannot spawn the proxy (out of descriptors, for example) now
   warns and starts the editor. The unhandled `error` event from `spawn` threw in
   the launcher, which cost the editor over a blocker the person could not see.
