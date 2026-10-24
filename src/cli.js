@@ -548,6 +548,60 @@ function eventLine(entry) {
  * what a script used to get: an old decision, immediately, and nothing to say
  * which.
  */
+/** Sleep, unless the process is being stopped. Resolves false when aborted. */
+function pauseUnlessAborted(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Read one stream until it ends. Returns 0 when `--once` has had its entry, and
+ * null when the stream ended on its own - which is a restart to follow, not a
+ * reason to stop watching.
+ */
+async function readEvents(response, values) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return null;
+      buffer += decoder.decode(value, { stream: true });
+      let split;
+      while ((split = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, split);
+        buffer = buffer.slice(split + 2);
+        const data = block.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6)).join("\n");
+        if (data === "") continue;
+        let entry;
+        try {
+          entry = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        console.log(values.json ? JSON.stringify(entry) : eventLine(entry));
+        if (values.once) return 0;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
 async function commandEvents(values) {
   const policy = readPolicy();
   const url = `${proxyUrl(policy)}/_blackout/events${values.once ? "?tail=1" : ""}`;
@@ -555,51 +609,47 @@ async function commandEvents(values) {
   const stop = () => controller.abort();
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+  // Matches the server's `retry: 3000`, which promised reconnection that only
+  // the browser-based readers ever did. A proxy restart is ordinary on a
+  // desktop - an update, a crash, `systemctl restart` - and the follower used
+  // to end there, with `blackout: terminated` and exit 1.
+  const RETRY_MS = 3_000;
 
   try {
-    let response;
-    try {
-      response = await fetch(url, { signal: controller.signal, headers: { accept: "text/event-stream" } });
-    } catch {
-      // "fetch failed" names neither the address nor the fix. A refused
-      // connection here has one cause worth naming.
-      return fail(`proxy is not running at ${proxyUrl(policy)}`);
-    }
-    if (!response.ok || response.body === null) return fail(`proxy is not running at ${proxyUrl(policy)}`);
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    try {
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let split;
-        while ((split = buffer.indexOf("\n\n")) !== -1) {
-          const block = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
-          const data = block.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6)).join("\n");
-          if (data === "") continue;
-          let entry;
-          try {
-            entry = JSON.parse(data);
-          } catch {
-            continue;
-          }
-          console.log(values.json ? JSON.stringify(entry) : eventLine(entry));
-          if (values.once) {
-            controller.abort();
-            return 0;
-          }
-        }
+    let connected = false;
+    for (;;) {
+      let response = null;
+      let failed = false;
+      try {
+        response = await fetch(url, { signal: controller.signal, headers: { accept: "text/event-stream" } });
+        if (!response.ok || response.body === null) failed = true;
+      } catch {
+        failed = !controller.signal.aborted;
       }
-    } catch (error) {
-      if (!controller.signal.aborted) throw error;
-    } finally {
-      await reader.cancel().catch(() => undefined);
+      if (controller.signal.aborted) return 0;
+
+      if (failed) {
+        // "fetch failed" names neither the address nor the fix. Before the
+        // first connection that is the whole answer; afterwards it is a gap.
+        if (!connected) return fail(`proxy is not running at ${proxyUrl(policy)}`);
+        console.error(`blackout: lost ${proxyUrl(policy)}; reconnecting`);
+        if (!(await pauseUnlessAborted(RETRY_MS, controller.signal))) return 0;
+        continue;
+      }
+
+      connected = true;
+      let finished;
+      try {
+        finished = await readEvents(response, values);
+      } catch {
+        // The socket went away mid-frame: a restart, not a command failure.
+        if (controller.signal.aborted) return 0;
+        finished = null;
+      }
+      if (finished !== null) return finished;
+      console.error("blackout: the decision stream ended; reconnecting");
+      if (!(await pauseUnlessAborted(RETRY_MS, controller.signal))) return 0;
     }
-    return 0;
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
