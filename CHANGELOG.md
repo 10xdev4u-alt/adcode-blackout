@@ -44,6 +44,12 @@
   typo in `team.url` produced `cannot read ...config.json: team.url must be an
   absolute URL` for a feature that does not exist. Removed; unknown keys are
   ignored, as they always were.
+- `uninstall` finishes what it can when one step refuses. A launcher the user
+  had replaced threw before the AppImage record was forgotten and before the
+  summary printed, so the only output was the refusal and the next `launch`
+  still resolved the old build. The refusal still stands - the file is not
+  deleted - it is now reported at the end with the rest of the summary, and the
+  exit code is 1. The same applies to a `--purge` that stops on a symlink.
 - A stopping proxy lets the answers it already started land. SIGTERM destroyed
   every open connection on the spot, so `uninstall`, Ctrl-C and
   `systemctl restart` turned a request the app was waiting on into "fetch

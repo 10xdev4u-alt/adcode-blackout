@@ -398,27 +398,64 @@ async function stopOwnedProxy() {
   return { status: "foreign", message: `pid ${pid} did not stop; check ${describePid(pid)}` };
 }
 
+/**
+ * Undo the install, and keep going when one part of it refuses.
+ *
+ * The refusals are deliberate - a file blackout did not write is not deleted,
+ * and the journal is not removed under a running proxy - but they used to end
+ * the command mid-way: a launcher the user had replaced stopped the AppImage
+ * record from being forgotten, and the summary never printed at all. Now every
+ * step is attempted, each refusal is named, and the exit code says one happened.
+ */
 async function commandUninstall(values) {
+  const problems = [];
   const proxy = await stopOwnedProxy();
   // Deleting the journal under a proxy that is still appending to it would
   // remove the record while it is being written; the file is ours to delete
   // only once nothing is serving from it.
   const purgeable = proxy.status !== "foreign";
-  if (values.purge && purgeable) purgeData();
+  let purged = false;
+  if (values.purge && purgeable) {
+    try {
+      purgeData();
+      purged = true;
+    } catch (error) {
+      problems.push(String(error?.message ?? error));
+    }
+  }
   const removedUnit = removeUnit();
   if (removedUnit) {
     systemctl(["disable", "--now", "adcode-blackout.service"]);
     systemctl(["daemon-reload"]);
   }
   const restored = restoreDesktopEntries();
-  const removedWrapper = values["keep-wrapper"] ? false : removeWrapper();
+  let launcher;
+  if (values["keep-wrapper"]) {
+    launcher = "kept";
+  } else {
+    try {
+      launcher = removeWrapper() ? "removed" : "not installed";
+    } catch (error) {
+      launcher = "left in place; see below";
+      problems.push(String(error?.message ?? error));
+    }
+  }
   forgetAppImage();
+
+  const data = !values.purge
+    ? "journal and config kept; --purge removes them"
+    : !purgeable
+      ? `kept: ${proxy.message}`
+      : purged
+        ? "journal, config and state removed"
+        : "partly removed; see below";
   console.log(`proxy      ${proxy.message}`);
   console.log(`unit       ${removedUnit ? "removed" : "not installed"}`);
   console.log(`desktop    ${restored.length === 0 ? "nothing to restore" : `restored ${restored.length}`}`);
-  console.log(`launcher   ${removedWrapper ? "removed" : values["keep-wrapper"] ? "kept" : "not installed"}`);
-  console.log(`data       ${values.purge && purgeable ? "journal, config and state removed" : values.purge ? `kept: ${proxy.message}` : "journal and config kept; --purge removes them"}`);
-  return 0;
+  console.log(`launcher   ${launcher}`);
+  console.log(`data       ${data}`);
+  for (const problem of problems) console.error(`blackout: ${problem}`);
+  return problems.length === 0 ? 0 : 1;
 }
 
 function configLine(policy) {
