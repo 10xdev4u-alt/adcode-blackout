@@ -542,9 +542,43 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       origin = `http://${host}:${server.address().port}`;
       return origin;
     },
-    async close() {
-      server.closeAllConnections?.();
-      await new Promise((resolve) => server.close(resolve));
+    /**
+     * Stop listening, then let the answers that are already being written land.
+     *
+     * `uninstall`, `systemctl restart` and Ctrl-C all end with SIGTERM, and the
+     * old close destroyed every open connection on the spot: a request in
+     * flight came back as "fetch failed" 26 ms after the signal, which is a
+     * broken response the app has to interpret. `graceMs` is the longest that
+     * wait is allowed to last - a streaming subscriber that never finishes must
+     * not turn a stop into a hang.
+     *
+     * The listening socket closes immediately either way, so a caller polling
+     * for "has it stopped" does not have to wait out the grace period.
+     */
+    async close({ graceMs = 0 } = {}) {
+      const closed = new Promise((resolve) => server.close(resolve));
+      // A keep-alive socket with nothing in flight will never produce another
+      // request, so it must not hold the close open.
+      server.closeIdleConnections?.();
+      if (graceMs <= 0) {
+        server.closeAllConnections?.();
+        await closed;
+        return;
+      }
+      const timer = setTimeout(() => server.closeAllConnections?.(), graceMs);
+      timer.unref?.();
+      /*
+       * A connection that was busy when the close started only becomes idle
+       * when its response ends, and `server.close()` waits for that socket.
+       * Sweeping while we wait is what makes the exit prompt instead of always
+       * costing the full grace: measured, one finished response still took the
+       * whole 3 s without it.
+       */
+      const sweep = setInterval(() => server.closeIdleConnections?.(), 50);
+      sweep.unref?.();
+      await closed;
+      clearTimeout(timer);
+      clearInterval(sweep);
     },
   };
 }

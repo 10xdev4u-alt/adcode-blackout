@@ -44,6 +44,13 @@
   typo in `team.url` produced `cannot read ...config.json: team.url must be an
   absolute URL` for a feature that does not exist. Removed; unknown keys are
   ignored, as they always were.
+- A stopping proxy lets the answers it already started land. SIGTERM destroyed
+  every open connection on the spot, so `uninstall`, Ctrl-C and
+  `systemctl restart` turned a request the app was waiting on into "fetch
+  failed" 26 ms after the signal. The listening socket still closes at once, so
+  a caller polling for "has it stopped" does not wait; existing answers get up to
+  three seconds, and idle keep-alive sockets are swept while waiting so a
+  finished response does not cost the whole grace period.
 - `blackout doctor` reports an unreadable journal instead of dying on it. The
   journal check read the file outside any handler, so a corrupt line printed
   `cannot read journal ... corrupt at line N` and nothing else - no node, config,
