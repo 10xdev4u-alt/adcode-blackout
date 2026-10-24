@@ -746,9 +746,20 @@ async function commandDoctor(values = {}) {
 
   add(existsSync(unitPath()) ? "ok" : "warn", "systemd", existsSync(unitPath()) ? `${unitPath()}${unitEnabled() ? ", enabled" : ", not enabled"}` : "no user unit; the launcher starts the proxy on demand");
 
-  const entries = journalOrEmpty();
-  const chain = verifyChain(entries);
-  add(chain.ok ? "ok" : "fail", "journal", chain.ok ? `${entries.length} entries verified` : `BROKEN at ${chain.brokenAt}`);
+  /*
+   * A journal that cannot be read is a finding, not the end of the report.
+   * `journalOrEmpty` throws on a corrupt line, and letting that escape printed
+   * the read error instead of the table - so `doctor`, the command whose job is
+   * to say what is wrong, said nothing about the eight checks it had already
+   * run, and `--json` returned nothing a script could parse.
+   */
+  try {
+    const entries = journalOrEmpty();
+    const chain = verifyChain(entries);
+    add(chain.ok ? "ok" : "fail", "journal", chain.ok ? `${entries.length} entries verified` : `BROKEN at ${chain.brokenAt}`);
+  } catch (error) {
+    add("fail", "journal", String(error?.message ?? error));
+  }
 
   if (policy !== undefined) {
     try {
