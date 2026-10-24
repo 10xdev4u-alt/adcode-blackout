@@ -235,6 +235,15 @@ export async function runCompat({ appImage, args = [], seconds = 60, policy, rul
 
     let exit = await Promise.race([exited, window]);
     clearTimeout(timer);
+    /*
+     * `exited` resolves with the code alone; only the window sets `timedOut`.
+     * `judge` distinguishes the two - it asks `exit.timedOut === false` before
+     * calling a run "quit on its own" - so an observed exit has to be marked
+     * here. Without this, the second-instance note never reached a real run:
+     * `undefined === false` is false, and the explanation only ever appeared in
+     * tests that passed the flag themselves.
+     */
+    if (exit.timedOut === undefined && exit.error === undefined) exit = { ...exit, timedOut: false };
 
     if (exit.timedOut) {
       stopTree("SIGTERM");

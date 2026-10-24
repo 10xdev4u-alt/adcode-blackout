@@ -39,6 +39,11 @@
   proxy kept serving. Ownership now comes from the process holding the port, and
   `--purge` refuses to delete the journal under a listener it cannot prove is
   the proxy.
+- The "ADCode is already open" explanation from `blackout compat` reaches the
+  person running it. `judge` only adds the note when the exit is marked as
+  observed, and the runner resolved a real exit as `{ code, signal }` without
+  that flag, so `undefined === false` dropped it and only the unit test - which
+  passed the flag itself - ever saw it. An observed exit is now marked.
 - A launcher that cannot spawn the proxy (out of descriptors, for example) now
   warns and starts the editor. The unhandled `error` event from `spawn` threw in
   the launcher, which cost the editor over a blocker the person could not see.
