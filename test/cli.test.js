@@ -381,6 +381,24 @@ test("uninstall refuses to purge while a proxy it cannot prove is still serving"
   }
 });
 
+test("uninstall finishes the rest when the launcher is not ours", async () => {
+  const { home, app } = await setup(18810);
+  const wrapper = join(home, ".local", "bin", "adcode");
+  const installed = run(home, ["install", "--app", app, "--desktop"]);
+  assert.equal(installed.status, 0, installed.stderr);
+  // The user replaced our launcher with their own. Uninstall must not delete
+  // it, and must not stop before the steps that have nothing to do with it.
+  writeFileSync(wrapper, "#!/bin/sh\n# mine\nexit 0\n");
+
+  const removed = run(home, ["uninstall"]);
+  assert.equal(removed.status, 1, "a refusal is worth reporting");
+  assert.match(removed.stderr, /refusing to remove/);
+  assert.match(removed.stdout, /launcher\s+left in place/);
+  assert.match(removed.stdout, /proxy\s+not running/, "the summary still prints");
+  assert.equal(readFileSync(wrapper, "utf8"), "#!/bin/sh\n# mine\nexit 0\n");
+  assert.ok(!existsSync(join(home, ".config", "blackout", "appimage")), "the AppImage record is still forgotten");
+});
+
 test("purge refuses to follow a symlink out of the state directory", async () => {
   const { home } = await setup(18800);
   const target = join(home, "outside.txt");
