@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -125,6 +125,30 @@ test("desktop entries for this AppImage are repointed, with a backup", () => {
 
   restoreDesktopEntries(home);
   assert.match(readFileSync(entry, "utf8"), new RegExp(app.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("a symlinked entry is left alone, and so is its target", () => {
+  // ~/.local/share/applications sometimes links to /usr/share. Following the
+  // link would rewrite a file outside the directory this command owns, and the
+  // backup would then replace the link on uninstall.
+  const target = join(home, "system-adcode.desktop");
+  writeFileSync(target, `[Desktop Entry]\nExec=/home/me/Applications/ADCode-2.3.0.AppImage %U\n`);
+  const link = join(applicationsDir(home), "linked.desktop");
+  mkdirSync(applicationsDir(home), { recursive: true });
+  symlinkSync(target, link);
+
+  const app = APP("ADCode-2.4.0.AppImage");
+  const patched = patchDesktopEntries({ home, appImage: app });
+  assert.equal(patched.length, 0);
+  assert.match(readFileSync(target, "utf8"), /ADCode-2\.3\.0\.AppImage/, "the target is untouched");
+  assert.ok(lstatSync(link).isSymbolicLink(), "the link is still a link");
+  assert.ok(!existsSync(`${link}.blackout-backup`), "no backup was written beside the link");
+
+  // And a backup next to a link is not restored over it.
+  writeFileSync(`${link}.blackout-backup`, "backup\n");
+  assert.deepEqual(restoreDesktopEntries(home), []);
+  assert.ok(lstatSync(link).isSymbolicLink());
+  rmSync(`${link}.blackout-backup`);
 });
 
 test("an entry for an older AppImage is repointed too", () => {
