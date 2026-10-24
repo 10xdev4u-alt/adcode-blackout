@@ -74,6 +74,46 @@ test("a truncated final line is dropped, not fatal", () => {
   assert.deepEqual(verifyChain(entries), { ok: true, brokenAt: null });
 });
 
+test("two decisions after a torn write do not corrupt the journal", () => {
+  const path = tempJournal();
+  const first = createJournal(path);
+  first.append("a", { n: 1 });
+  appendFileSync(path, '{"seq":1,"at":');
+
+  // The crash is over; the next process appends twice. An unrepaired fragment
+  // would glue itself to the first of these and leave a broken line in the
+  // middle of the file, where the truncation tolerance no longer applies.
+  const second = createJournal(path);
+  assert.equal(second.entries.length, 1, "the half-written line is dropped");
+  second.append("b", { n: 2 });
+  second.append("c", { n: 3 });
+
+  const onDisk = readJournal(path);
+  assert.deepEqual(onDisk.map((entry) => entry.kind), ["a", "b", "c"]);
+  assert.deepEqual(verifyChain(onDisk), { ok: true, brokenAt: null });
+
+  // And it keeps loading: the same file after another restart.
+  const third = createJournal(path);
+  assert.equal(third.entries.length, 3);
+  assert.equal(third.head(), second.head());
+});
+
+test("a complete final line without its newline is kept, not dropped", () => {
+  const path = tempJournal();
+  const first = createJournal(path);
+  first.append("a", { n: 1 });
+  // A crash between the write and the newline: the entry itself is whole.
+  writeFileSync(path, readJournal(path).map((entry) => JSON.stringify(entry)).join("\n"));
+
+  const second = createJournal(path);
+  assert.equal(second.entries.length, 1);
+  second.append("b", { n: 2 });
+
+  const onDisk = readJournal(path);
+  assert.deepEqual(onDisk.map((entry) => entry.kind), ["a", "b"]);
+  assert.deepEqual(verifyChain(onDisk), { ok: true, brokenAt: null });
+});
+
 test("rotation keeps one file bounded and the chain intact", () => {
   const path = tempJournal();
   const journal = createJournal(path, { maxBytes: 600 });
