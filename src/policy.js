@@ -5,6 +5,11 @@
  * dashboard on. Everything that could expose the proxy to a network is refused
  * rather than clamped, because a typo in a host is how a local tool becomes a
  * public one.
+ *
+ * Only settings something reads belong here. A `team` block used to be parsed
+ * and validated with no reader anywhere: nothing documented it, and a
+ * misspelled `team.url` stopped every command with "cannot read config.json".
+ * A setting that cannot do anything must not be able to break anything.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -17,7 +22,6 @@ export const DEFAULT_POLICY = Object.freeze({
   enabled: true,
   dashboard: true,
   estimates: Object.freeze({ secondsPerAd: 8, microsPerView: 1500 }),
-  team: Object.freeze({ url: null, token: null, intervalMs: 60_000 }),
   rules: "core",
 });
 
@@ -67,7 +71,6 @@ export function parsePolicy(input = {}) {
   }
 
   const estimates = { ...DEFAULT_POLICY.estimates, ...(input.estimates ?? {}) };
-  const team = { ...DEFAULT_POLICY.team, ...(input.team ?? {}) };
 
   const policy = {
     upstream: httpUrl(input.upstream ?? DEFAULT_POLICY.upstream, "upstream"),
@@ -78,11 +81,6 @@ export function parsePolicy(input = {}) {
     estimates: {
       secondsPerAd: positiveInteger(estimates.secondsPerAd, "estimates.secondsPerAd", { max: 3_600 }),
       microsPerView: positiveInteger(estimates.microsPerView, "estimates.microsPerView", { max: 1_000_000_000 }),
-    },
-    team: {
-      url: team.url === null ? null : httpUrl(team.url, "team.url"),
-      token: team.token === null ? null : String(team.token),
-      intervalMs: positiveInteger(team.intervalMs, "team.intervalMs", { min: 5_000, max: 86_400_000 }),
     },
     rules: String(input.rules ?? DEFAULT_POLICY.rules),
   };
