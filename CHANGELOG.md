@@ -39,6 +39,12 @@
   proxy kept serving. Ownership now comes from the process holding the port, and
   `--purge` refuses to delete the journal under a listener it cannot prove is
   the proxy.
+- `blackout events --once` prints the latest decision, or waits for the next one
+  when there is no history. The stream replays the last 20 entries and the
+  command printed the first of them, so a script asking for "the next decision"
+  got the oldest one immediately - and the documented post-SIGHUP check showed a
+  decision from before the reload instead of `rules-reloaded`. `?tail=N` now
+  bounds the replay for that one caller.
 - The "ADCode is already open" explanation from `blackout compat` reaches the
   person running it. `judge` only adds the note when the exit is marked as
   observed, and the runner resolved a real exit as `{ code, signal }` without
