@@ -33,6 +33,15 @@ test("a bad upstream scheme is refused", () => {
   assert.throws(() => parsePolicy({ upstream: "not a url" }), /absolute URL/);
 });
 
+test("a setting nothing reads cannot stop the tool", () => {
+  // `team` was parsed, validated and never used. The failure mode was worse
+  // than dead code: a config carrying it stopped every command on a validation
+  // error for a feature that does not exist.
+  const policy = parsePolicy({ team: { url: "adcode.example.com" } });
+  assert.equal(policy.team, undefined);
+  assert.equal(policy.upstream, "https://adcode.bluethenics.com");
+});
+
 test("a policy round-trips through disk", () => {
   const dir = mkdtempSync(join(tmpdir(), "blackout-policy-"));
   dirs.push(dir);

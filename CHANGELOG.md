@@ -39,6 +39,11 @@
   proxy kept serving. Ownership now comes from the process holding the port, and
   `--purge` refuses to delete the journal under a listener it cannot prove is
   the proxy.
+- A `team` block in `config.json` no longer stops every command. The setting
+  was parsed and validated but nothing read it and nothing documented it, so a
+  typo in `team.url` produced `cannot read ...config.json: team.url must be an
+  absolute URL` for a feature that does not exist. Removed; unknown keys are
+  ignored, as they always were.
 - `blackout doctor` reports an unreadable journal instead of dying on it. The
   journal check read the file outside any handler, so a corrupt line printed
   `cannot read journal ... corrupt at line N` and nothing else - no node, config,
