@@ -39,6 +39,11 @@
   proxy kept serving. Ownership now comes from the process holding the port, and
   `--purge` refuses to delete the journal under a listener it cannot prove is
   the proxy.
+- `blackout doctor` reports an unreadable journal instead of dying on it. The
+  journal check read the file outside any handler, so a corrupt line printed
+  `cannot read journal ... corrupt at line N` and nothing else - no node, config,
+  rule or upstream check, and `--json` produced no object at all. The command
+  that exists to say what is wrong now says this, and the rest.
 - `blackout events --once` prints the latest decision, or waits for the next one
   when there is no history. The stream replays the last 20 entries and the
   command printed the first of them, so a script asking for "the next decision"

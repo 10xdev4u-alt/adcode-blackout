@@ -573,6 +573,28 @@ test("config refuses an invalid value and leaves the file alone", async () => {
   assert.equal(readFileSync(join(home, ".config", "blackout", "config.json"), "utf8"), before);
 });
 
+test("doctor reports an unreadable journal instead of dying on it", async () => {
+  const { home } = await setup(18809);
+  const journal = join(home, ".local", "state", "blackout", "journal.jsonl");
+  mkdirSync(join(home, ".local", "state", "blackout"), { recursive: true });
+  // Unparseable in the middle, where the truncated-tail tolerance does not
+  // apply: the read throws, and doctor used to print only that. A bad *last*
+  // line would be dropped as a torn write instead, which is why there is a
+  // third line after it.
+  const line = (seq) => `${JSON.stringify({ seq, at: seq + 1, kind: "x", data: {}, prev: "0".repeat(64), hash: "x" })}\n`;
+  writeFileSync(journal, `${line(0)}not json\n${line(2)}`);
+
+  const result = run(home, ["doctor", "--json"]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  const journalCheck = parsed.checks.find((check) => check.name === "journal");
+  assert.equal(journalCheck.state, "fail");
+  assert.match(journalCheck.detail, /corrupt at line 2/);
+  // The rest of the diagnosis is still there, which is the point.
+  assert.ok(parsed.checks.some((check) => check.name === "node" && check.state === "ok"));
+  assert.ok(parsed.checks.length >= 6, `${parsed.checks.length} checks`);
+});
+
 test("doctor --json is a stable object with one entry per check", async () => {
   const { home, app } = await setup(18806);
   const installed = run(home, ["install", "--app", app]);
