@@ -215,6 +215,27 @@ test("a build that dies is judged fail by the runner, and keeps its log", async 
   discardRetained(result);
 });
 
+test("the second-instance explanation survives the runner, not just the judge", async () => {
+  // A build that quits cleanly before the window is the ordinary "ADCode is
+  // already open" case. The note is only added when the exit is marked as
+  // observed, so this is about what `runCompat` hands to `judge`, not about
+  // `judge` itself - which is why the old test passed while the note was
+  // missing from every real run.
+  const appImage = fakeApp("exit 0\n");
+
+  const result = await runCompat({
+    appImage,
+    seconds: 1,
+    policy: parsePolicy({ upstream: upstreamOrigin }),
+    rules,
+  });
+
+  assert.equal(result.verdict, "fail");
+  assert.match(result.note ?? "", /already open/);
+  assert.match(formatCompat(result), /close it and run again/);
+  discardRetained(result);
+});
+
 test("traffic that never touches an ad path is inconclusive, not 'never called'", () => {
   const result = judge({ entries: [], requests: 4, exit: stayed, seconds: 60 });
   assert.equal(result.verdict, "inconclusive");
