@@ -325,10 +325,19 @@ function purgeData() {
   return removed;
 }
 
+/**
+ * Stop the proxy this tool started, and only that one.
+ *
+ * The pid file outlives the process that wrote it, so on a reboot-warmed pid
+ * space it can name a stranger. `foreign` means a proxy is answering but the
+ * pid file does not name the process holding the port: nothing is signalled,
+ * because the alternative is a SIGTERM to something the user did not start.
+ * `absent` means the port is free and anything in the state directory is ours.
+ */
 async function stopOwnedProxy() {
   const policy = readPolicy();
   const url = proxyUrl(policy);
-  if ((await probe(url)) === null) return "not running";
+  if ((await probe(url)) === null) return { status: "absent", message: "not running" };
 
   let pid = null;
   try {
@@ -336,25 +345,45 @@ async function stopOwnedProxy() {
   } catch {
     pid = null;
   }
-  if (!Number.isSafeInteger(pid) || pid <= 1 || !isBlackoutPid(pid)) {
-    return `running at ${url}, but not started by blackout; stop it yourself`;
+  if (!Number.isSafeInteger(pid) || pid <= 1) {
+    return { status: "foreign", message: `running at ${url}, but not started by blackout; stop it yourself` };
   }
+
+  // The kernel knows who holds the port; the pid file only claims to. When the
+  // two disagree, the process holding the port is the one to trust - but only
+  // if it is the proxy, never because it happens to be listening.
+  const owner = listenerPid(policy.port);
+  let stale = null;
+  if (owner !== null && owner !== pid) {
+    if (!isBlackoutPid(owner)) {
+      return { status: "foreign", message: `running at ${url} as ${describePid(owner)}; not a blackout proxy, so nothing was stopped` };
+    }
+    stale = pid;
+    pid = owner;
+  } else if (!isBlackoutPid(pid)) {
+    return { status: "foreign", message: `running at ${url}, but ${pidPath()} does not name the proxy; stop it yourself` };
+  }
+  const ignored = stale === null ? "" : ` (ignored a stale pid ${stale} in ${pidPath()})`;
 
   try {
     process.kill(pid, "SIGTERM");
   } catch {
-    return `running at ${url}; pid ${pid} was already gone`;
+    return { status: "foreign", message: `running at ${url}; pid ${pid} was already gone` };
   }
   for (let attempt = 0; attempt < 20; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 100));
-    if ((await probe(url, { timeoutMs: 200 })) === null) return `stopped pid ${pid}`;
+    if ((await probe(url, { timeoutMs: 200 })) === null) return { status: "stopped", message: `stopped pid ${pid}${ignored}` };
   }
-  return `pid ${pid} did not stop; check ${describePid(pid)}`;
+  return { status: "foreign", message: `pid ${pid} did not stop; check ${describePid(pid)}` };
 }
 
 async function commandUninstall(values) {
   const proxy = await stopOwnedProxy();
-  if (values.purge) purgeData();
+  // Deleting the journal under a proxy that is still appending to it would
+  // remove the record while it is being written; the file is ours to delete
+  // only once nothing is serving from it.
+  const purgeable = proxy.status !== "foreign";
+  if (values.purge && purgeable) purgeData();
   const removedUnit = removeUnit();
   if (removedUnit) {
     systemctl(["disable", "--now", "adcode-blackout.service"]);
@@ -363,11 +392,11 @@ async function commandUninstall(values) {
   const restored = restoreDesktopEntries();
   const removedWrapper = values["keep-wrapper"] ? false : removeWrapper();
   forgetAppImage();
-  console.log(`proxy      ${proxy}`);
+  console.log(`proxy      ${proxy.message}`);
   console.log(`unit       ${removedUnit ? "removed" : "not installed"}`);
   console.log(`desktop    ${restored.length === 0 ? "nothing to restore" : `restored ${restored.length}`}`);
   console.log(`launcher   ${removedWrapper ? "removed" : values["keep-wrapper"] ? "kept" : "not installed"}`);
-  console.log(`data       ${values.purge ? "journal, config and state removed" : "journal and config kept; --purge removes them"}`);
+  console.log(`data       ${values.purge && purgeable ? "journal, config and state removed" : values.purge ? `kept: ${proxy.message}` : "journal and config kept; --purge removes them"}`);
   return 0;
 }
 

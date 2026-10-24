@@ -81,10 +81,20 @@ export function listenerPid(port, { platform = process.platform } = {}) {
   return pid ?? pidFromSs(port);
 }
 
-/** Is this pid plausibly the proxy we started, rather than a recycled pid? */
+/**
+ * Is this pid the proxy we started, rather than a recycled pid?
+ *
+ * The pid is read from a file that outlives the process that wrote it, so after
+ * a reboot it can name anything. A command line that merely mentions "blackout"
+ * is not proof: `tail -f ~/.local/state/blackout/blackout.log` and
+ * `vim ~/.config/blackout/config.json` both contain it, and both died to a
+ * SIGTERM that named them. The proxy is always `node <...>/blackout.js serve`,
+ * so both the entrypoint and the subcommand are required.
+ */
 export function isBlackoutPid(pid) {
   try {
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("blackout");
+    const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+    return argv.includes("serve") && argv.some((arg) => arg.endsWith("blackout.js"));
   } catch {
     return false;
   }

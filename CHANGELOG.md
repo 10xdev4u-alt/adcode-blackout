@@ -32,6 +32,13 @@
   there `serve` refused to start and `verify` and `report` threw. The fragment
   is now removed from the file before anything is written to it, in the same
   open that resumes the chain.
+- `uninstall` stops the proxy, not whatever a stale pid file names. The old
+  check was "the command line contains blackout", which is also true of
+  `tail -f ~/.local/state/blackout/blackout.log`; a recycled pid matching that
+  was sent SIGTERM, and the command still printed `stopped pid N` while the real
+  proxy kept serving. Ownership now comes from the process holding the port, and
+  `--purge` refuses to delete the journal under a listener it cannot prove is
+  the proxy.
 - A launcher that cannot spawn the proxy (out of descriptors, for example) now
   warns and starts the editor. The unhandled `error` event from `spawn` threw in
   the launcher, which cost the editor over a blocker the person could not see.
