@@ -412,6 +412,33 @@ test("close does not wait forever on a subscriber that never reads", async () =>
   socket.destroy();
 });
 
+test("an IPv6 loopback policy answers instead of failing to parse", async (t) => {
+  // The request URL used to be parsed against `http://${policy.host}`, which is
+  // `http://::1` for an IPv6 host: `new URL` throws, and every request came back
+  // 500 "Invalid URL".
+  const journal = createJournal();
+  const own = createProxy({ policy: parsePolicy({ host: "::1", port: 0, upstream: upstreamOrigin }), journal, rules });
+  let url;
+  try {
+    url = await own.listen(0, "::1");
+  } catch (error) {
+    t.skip(`no IPv6 loopback here: ${error.code ?? error.message}`);
+    return;
+  }
+  try {
+    assert.match(url, /^http:\/\/\[::1\]:\d+$/);
+    const health = await fetch(`${url}/_blackout/health`);
+    assert.equal(health.status, 200);
+    assert.equal((await health.json()).ok, true);
+
+    const served = await fetch(`${url}/v1/serve`, { method: "POST", body: "{}" });
+    assert.equal(served.status, 200);
+    assert.deepEqual(await served.json(), { creatives: [] });
+  } finally {
+    await own.close();
+  }
+});
+
 test("an unreachable upstream is a 502 with a journal entry", async () => {
   upstream.closeAllConnections?.();
   await new Promise((resolve) => upstream.close(resolve));

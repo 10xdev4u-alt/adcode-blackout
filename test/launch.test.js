@@ -40,6 +40,11 @@ test("launchApp reports a missing executable instead of throwing", async () => {
   assert.ok(result.error instanceof Error);
 });
 
+test("an IPv6 host becomes a URL the app can use", () => {
+  assert.equal(proxyUrl({ host: "::1", port: 8790 }), "http://[::1]:8790");
+  assert.equal(proxyUrl({ host: "127.0.0.1", port: 8790 }), "http://127.0.0.1:8790");
+});
+
 test("ensureProxy reuses a running proxy and does not start a second", async () => {
   const dir = await mkdtemp(join(tmpdir(), "blackout-reuse-"));
   dirs.push(dir);

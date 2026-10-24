@@ -10,7 +10,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { logPath, pidPath } from "./policy.js";
+import { hostPort, logPath, pidPath } from "./policy.js";
 
 const READY_TIMEOUT_MS = 4_000;
 const READY_STEP_MS = 100;
@@ -26,7 +26,7 @@ export async function probe(baseUrl, { fetchImpl = fetch, timeoutMs = 500 } = {}
 }
 
 export function proxyUrl(policy) {
-  return `http://${policy.host}:${policy.port}`;
+  return `http://${hostPort(policy.host, policy.port)}`;
 }
 
 async function waitUntilReady(baseUrl, { fetchImpl, timeoutMs = READY_TIMEOUT_MS } = {}) {

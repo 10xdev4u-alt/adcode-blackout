@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadPolicy, parsePolicy, savePolicy } from "../src/policy.js";
+import { hostPort, loadPolicy, parsePolicy, savePolicy } from "../src/policy.js";
 
 const dirs = [];
 after(() => {
@@ -31,6 +31,14 @@ test("ports and estimates are bounded integers", () => {
 test("a bad upstream scheme is refused", () => {
   assert.throws(() => parsePolicy({ upstream: "file:///etc/passwd" }), /http/);
   assert.throws(() => parsePolicy({ upstream: "not a url" }), /absolute URL/);
+});
+
+test("an IPv6 loopback host is bracketed wherever a port follows it", () => {
+  // `http://::1:8790` is not a URL. Without this, `status` said "not running"
+  // against a serving proxy and the app got an unusable ADCODE_AD_SERVER.
+  assert.equal(hostPort("::1", 8790), "[::1]:8790");
+  assert.equal(hostPort("127.0.0.1", 8790), "127.0.0.1:8790");
+  assert.equal(hostPort("localhost", 80), "localhost:80");
 });
 
 test("a setting nothing reads cannot stop the tool", () => {

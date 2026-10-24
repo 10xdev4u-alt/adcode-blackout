@@ -10,7 +10,7 @@ import { existsSync, lstatSync, readFileSync, rmdirSync, unlinkSync } from "node
 import { parseArgs } from "node:util";
 import { createProxy } from "./proxy.js";
 import { createJournal, readJournalChain, verifyChain } from "./journal.js";
-import { loadPolicy, parsePolicy, savePolicy, ensureHome, journalPath, logPath, pidPath, policyPath, stateHome, configHome } from "./policy.js";
+import { loadPolicy, parsePolicy, savePolicy, ensureHome, hostPort, journalPath, logPath, pidPath, policyPath, stateHome, configHome } from "./policy.js";
 import { bundledRulePath, loadRulePack } from "./rules.js";
 import { buildReport, formatReport } from "./report.js";
 import { VERSION } from "./version.js";
@@ -185,7 +185,7 @@ async function commandServe(values) {
         console.log(`blackout already running at ${proxyUrl(policy)}`);
         return 0;
       }
-      return fail(`${policy.host}:${policy.port} is in use by another process`);
+      return fail(`${hostPort(policy.host, policy.port)} is in use by another process`);
     }
     throw error;
   }
@@ -462,7 +462,7 @@ function configLine(policy) {
   return [
     `file       ${policyPath()}`,
     `upstream   ${policy.upstream}`,
-    `listen     ${policy.host}:${policy.port}`,
+    `listen     ${hostPort(policy.host, policy.port)}`,
     `dashboard  ${policy.dashboard ? "on" : "off"}`,
     `rules      ${policy.rules}`,
   ].join("\n");

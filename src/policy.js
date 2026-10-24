@@ -35,6 +35,18 @@ export function stateHome() {
   return process.env["BLACKOUT_STATE"] ?? join(process.env["XDG_STATE_HOME"] ?? join(homedir(), ".local", "state"), "blackout");
 }
 
+/**
+ * A host and port as one authority.
+ *
+ * The policy allows `::1`, and an IPv6 literal has to be bracketed wherever it
+ * sits next to a port. Without the brackets `http://::1:8790` is not a URL:
+ * `status` reported "not running" against a serving proxy, and the app was
+ * launched with an `ADCODE_AD_SERVER` it could not use.
+ */
+export function hostPort(host, port) {
+  return `${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
 export const policyPath = () => join(configHome(), "config.json");
 export const journalPath = () => join(stateHome(), "journal.jsonl");
 export const pidPath = () => join(stateHome(), "blackout.pid");

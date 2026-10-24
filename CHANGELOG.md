@@ -44,6 +44,13 @@
   typo in `team.url` produced `cannot read ...config.json: team.url must be an
   absolute URL` for a feature that does not exist. Removed; unknown keys are
   ignored, as they always were.
+- An IPv6 loopback host works end to end (`"host": "::1"`). Two failures: every
+  URL built from the policy left out the brackets, so `status` said "not
+  running" against a serving proxy and the app was launched with an unusable
+  `ADCODE_AD_SERVER` (`http://::1:8790`); and each request's URL was parsed
+  against `http://${policy.host}`, which is `http://::1` - `new URL` throws, so
+  every request answered `500 Invalid URL`. Authorities are bracketed now, and
+  the request URL is parsed against a fixed base since only its path is read.
 - `blackout events` reconnects after the proxy restarts. The stream advertised
   `retry: 3000` on the assumption that something would, but the CLI read once
   and exited - `blackout: terminated`, status 1 - so a follower lost the view at
