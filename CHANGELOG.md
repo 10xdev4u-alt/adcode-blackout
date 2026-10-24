@@ -44,6 +44,15 @@
   typo in `team.url` produced `cannot read ...config.json: team.url must be an
   absolute URL` for a feature that does not exist. Removed; unknown keys are
   ignored, as they always were.
+- `uninstall` disables the systemd unit before deleting its file. `systemctl
+  disable` reads the unit it is disabling: the old order worked only while
+  systemd still had the unit loaded, and the `--now` half - the one stop that
+  does not depend on trusting the pid file - silently failed every time. A
+  `daemon-reload` in between would have left a dangling `wants` symlink, and a
+  proxy whose ownership could not be proven would have kept running with no
+  unit left to address it. Verified against a real `systemctl --user` session:
+  active and enabled, serving and journaling under `ProtectHome=read-only` with
+  `StateDirectory`, then inactive, gone, port free, no `wants` link.
 - `install --desktop` no longer writes through a symlinked desktop entry. A
   link in `~/.local/share/applications` to an entry under /usr/share was
   followed, so the patch landed on a file blackout does not own; the backup was

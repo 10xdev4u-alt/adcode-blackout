@@ -423,9 +423,20 @@ async function commandUninstall(values) {
       problems.push(String(error?.message ?? error));
     }
   }
-  const removedUnit = removeUnit();
-  if (removedUnit) {
+  /*
+   * Disable before removing the file.
+   *
+   * `systemctl disable` reads the unit it is disabling, and `--now` is the only
+   * stop that does not depend on the pid file being ours. Removing the file
+   * first worked only because systemd still had the unit loaded; a
+   * `daemon-reload` in between would have left a dangling `wants` symlink, and
+   * a proxy that ownership could not prove would have kept running with no unit
+   * left to address it.
+   */
+  let removedUnit = false;
+  if (existsSync(unitPath())) {
     systemctl(["disable", "--now", "adcode-blackout.service"]);
+    removedUnit = removeUnit();
     systemctl(["daemon-reload"]);
   }
   const restored = restoreDesktopEntries();
