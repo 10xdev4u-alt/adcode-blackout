@@ -15,6 +15,7 @@
 import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { hostPort } from "./policy.js";
 import { matchRule } from "./rules.js";
 import { rewriteConfig, SAFE_CONFIG } from "./config.js";
 import { buildReport } from "./report.js";
@@ -227,7 +228,14 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       return;
     }
 
-    const url = new URL(req.url ?? "/", `http://${policy.host}`);
+    /*
+     * Only the path and the query are read from this, never the authority - the
+     * Host header was already checked above. The base is a fixed sentinel
+     * because building one from `policy.host` made `::1` a parse error: `new
+     * URL("/x", "http://::1")` throws, and every request answered 500
+     * `Invalid URL`.
+     */
+    const url = new URL(req.url ?? "/", "http://blackout.invalid");
 
     if (url.pathname.startsWith("/_blackout/")) {
       await local(req, res, url);
@@ -539,7 +547,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
           resolve();
         });
       });
-      origin = `http://${host}:${server.address().port}`;
+      origin = `http://${hostPort(host, server.address().port)}`;
       return origin;
     },
     /**
