@@ -361,6 +361,57 @@ test("a subscriber that keeps reading is not cut off", async () => {
   ac.abort();
 });
 
+test("close lets an answer that is already in flight land", async () => {
+  // SIGTERM is `uninstall`, Ctrl-C and `systemctl restart`. Destroying the
+  // connection on the spot turned a request the app was waiting on into "fetch
+  // failed" 26 ms after the signal.
+  const slow = createServer((req, res) => {
+    setTimeout(() => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ made: "it" }));
+    }, 300);
+  });
+  await new Promise((resolve) => slow.listen(0, "127.0.0.1", resolve));
+
+  const journal = createJournal();
+  const own = createProxy({ policy: parsePolicy({ port: 0, upstream: `http://127.0.0.1:${slow.address().port}` }), journal, rules });
+  const url = await own.listen(0, "127.0.0.1");
+  try {
+    const inFlight = fetch(`${url}/v1/balance`).then(async (response) => ({ status: response.status, body: await response.text() }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const startedAt = Date.now();
+    const closing = own.close({ graceMs: 2_000 });
+    const answer = await inFlight;
+    assert.equal(answer.status, 200);
+    assert.deepEqual(JSON.parse(answer.body), { made: "it" });
+    await closing;
+    // And it did not wait out the grace period for a socket that was already done.
+    assert.ok(Date.now() - startedAt < 1_500, `close took ${Date.now() - startedAt}ms`);
+  } finally {
+    slow.closeAllConnections?.();
+    await new Promise((resolve) => slow.close(resolve));
+  }
+});
+
+test("close does not wait forever on a subscriber that never reads", async () => {
+  const journal = createJournal();
+  const own = createProxy({ policy: parsePolicy({ port: 0, upstream: upstreamOrigin }), journal, rules });
+  const url = await own.listen(0, "127.0.0.1");
+  const socket = connect(Number(new URL(url).port), "127.0.0.1");
+  socket.on("error", () => {});
+  await new Promise((resolve) => socket.once("connect", resolve));
+  socket.write("GET /_blackout/events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+  await new Promise((resolve) => socket.once("data", resolve));
+  socket.pause();
+
+  const startedAt = Date.now();
+  await own.close({ graceMs: 300 });
+  const elapsed = Date.now() - startedAt;
+  assert.ok(elapsed >= 250, `close gave up too early (${elapsed}ms)`);
+  assert.ok(elapsed < 2_000, `close took ${elapsed}ms`);
+  socket.destroy();
+});
+
 test("an unreachable upstream is a 502 with a journal entry", async () => {
   upstream.closeAllConnections?.();
   await new Promise((resolve) => upstream.close(resolve));

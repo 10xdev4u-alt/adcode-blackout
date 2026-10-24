@@ -35,6 +35,9 @@ import {
 
 const CLI = new URL("../bin/blackout.js", import.meta.url).pathname;
 
+/** How long a stopping proxy waits for answers it has already started. */
+const SHUTDOWN_GRACE_MS = 3_000;
+
 const USAGE = `blackout ${VERSION} - point ADCode at a proxy that answers no ads
 
   blackout install [--app PATH] [--desktop] [--autostart]
@@ -190,7 +193,9 @@ async function commandServe(values) {
   writePid(process.pid);
   const stop = async () => {
     removePid();
-    await proxy.close();
+    // Long enough for an answer that is already on its way, short enough that a
+    // stuck client cannot make `systemctl restart` wait forever.
+    await proxy.close({ graceMs: SHUTDOWN_GRACE_MS });
     process.exit(0);
   };
   process.on("SIGINT", stop);
