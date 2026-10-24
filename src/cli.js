@@ -233,9 +233,25 @@ async function commandLaunch(values, rest) {
     return 0;
   }
 
-  recordAppImage(resolved.path);
+  // Recording the path is a convenience for the next run, not a condition of
+  // this one: a read-only ~/.config must not cost the editor. It used to throw
+  // EACCES here, before the editor was ever considered.
+  try {
+    recordAppImage(resolved.path);
+  } catch (error) {
+    console.error(`blackout: cannot record ${resolved.path}: ${String(error?.message ?? error)}`);
+  }
 
-  const ready = await ensureProxy({ policy, cli: CLI });
+  // The proxy is best-effort; the editor is not. Opening the log or writing the
+  // pid file can fail for reasons the editor does not care about - a read-only
+  // state directory, no descriptors - so that is a warning and a launch too.
+  let ready;
+  try {
+    ready = await ensureProxy({ policy, cli: CLI });
+  } catch (error) {
+    console.error(`blackout: proxy did not start: ${String(error?.message ?? error)}`);
+    ready = { url: proxyUrl(policy), started: false, health: null };
+  }
   if (ready.health === null) {
     console.error("blackout: proxy is not answering; launching ADCode unprotected");
     console.error(`blackout: see ${logPath()} and run \`blackout doctor\``);

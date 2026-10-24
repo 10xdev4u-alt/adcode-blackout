@@ -252,6 +252,24 @@ test("events follows a decision, and --once exits after it", async () => {
   }
 });
 
+test("a read-only config directory does not stop the editor", { skip: process.platform === "win32" }, async () => {
+  const port = 18805;
+  const { home, app, out } = await setup(port);
+  const configDir = join(home, ".config", "blackout");
+  chmodSync(configDir, 0o500);
+  try {
+    const launched = run(home, ["launch", "--app", app]);
+    assert.equal(launched.status, 0, launched.stderr);
+    // The AppImage record could not be written; the editor still came up
+    // pointed at the proxy, which is the whole promise of the launcher.
+    assert.match(launched.stderr, /cannot record/);
+    assert.equal(readFileSync(out, "utf8").split("\n")[0], `http://127.0.0.1:${port}`);
+  } finally {
+    chmodSync(configDir, 0o700);
+    stopProxy(home);
+  }
+});
+
 test("uninstall stops the proxy it started", async () => {
   const { home, app } = await setup(18803);
   try {
