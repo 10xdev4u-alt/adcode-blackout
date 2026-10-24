@@ -17,6 +17,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -200,6 +201,15 @@ export function removeWrapper(home = homedir()) {
 
 /* ── Desktop entries ─────────────────────────────────────────────────────── */
 
+/*
+ * Only regular files, never a symlink.
+ *
+ * `~/.local/share/applications` sometimes holds links to entries under
+ * /usr/share, and `writeFileSync` follows them: patching one rewrote a system
+ * file that blackout does not own. The backup was then written beside the link,
+ * and `restoreDesktopEntries` renamed that over the link - so uninstall replaced
+ * the user's symlink with a regular file and left the system entry patched.
+ */
 function desktopFiles(home) {
   const dirs = [applicationsDir(home)];
   const files = [];
@@ -211,7 +221,14 @@ function desktopFiles(home) {
       continue;
     }
     for (const name of names) {
-      if (name.endsWith(".desktop")) files.push(join(dir, name));
+      if (!name.endsWith(".desktop")) continue;
+      const path = join(dir, name);
+      try {
+        if (!lstatSync(path).isFile()) continue;
+      } catch {
+        continue;
+      }
+      files.push(path);
     }
   }
   return files;

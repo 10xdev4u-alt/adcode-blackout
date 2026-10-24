@@ -44,6 +44,12 @@
   typo in `team.url` produced `cannot read ...config.json: team.url must be an
   absolute URL` for a feature that does not exist. Removed; unknown keys are
   ignored, as they always were.
+- `install --desktop` no longer writes through a symlinked desktop entry. A
+  link in `~/.local/share/applications` to an entry under /usr/share was
+  followed, so the patch landed on a file blackout does not own; the backup was
+  written beside the link, and `uninstall` renamed it over the link - replacing
+  the user's symlink and leaving the system entry patched. Only regular files in
+  that directory are considered now, by both the patch and the restore.
 - An IPv6 loopback host works end to end (`"host": "::1"`). Two failures: every
   URL built from the policy left out the brackets, so `status` said "not
   running" against a serving proxy and the app was launched with an unusable
