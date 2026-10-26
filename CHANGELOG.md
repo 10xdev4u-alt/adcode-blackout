@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- An upstream that dies mid-response is a fault again, not a silent truncation.
+  The request object does not error when the connection drops after the headers,
+  only the response does, and the one check that existed asked whether *our*
+  controller had been aborted - which the pipe sets as it tears down the failed
+  response. So a dropped upstream was classified as a cancellation: the client
+  got half a body with a 200 on it and the journal, the place upstream errors are
+  meant to be, recorded nothing. The response is now watched to completion and
+  the test is whether the *client* went away, so a truncation is journaled once
+  and the client's socket is destroyed instead of left to hang on a body that is
+  never coming.
 - The refusals at the library edges are covered, one case each: a rule pack
   nobody can honour (no name, no rules, a rule that is not an object, an invalid
   id, an unknown action, no match, an invalid method, both a path and a pattern,

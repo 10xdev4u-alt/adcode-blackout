@@ -15,6 +15,7 @@
 import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { finished } from "node:stream/promises";
 import { hostPort } from "./policy.js";
 import { matchRule } from "./rules.js";
 import { rewriteConfig, SAFE_CONFIG } from "./config.js";
@@ -368,6 +369,22 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
     }
     const request = target.protocol === "https:" ? httpsRequest : httpRequest;
     const controller = new AbortController();
+    /*
+     * What counts as our fault is whether the *client* went away, not whether the
+     * controller was aborted: a response that dies mid-body aborts it too, because
+     * the pipe tears down our side first. Asking the signal made an upstream that
+     * dropped the connection look like a cancellation, so the journal - the place
+     * upstream errors are supposed to be - stayed empty.
+     */
+    let clientGaveUp = false;
+    let reported = false;
+    const upstreamFault = (reason) => {
+      if (reported) return;
+      reported = true;
+      if (!clientGaveUp) journal.append("upstream-error", { path: url.pathname, reason });
+      if (!res.headersSent) sendJson(res, 502, { error: "upstream-unreachable" });
+      else if (!res.destroyed) res.destroy();
+    };
     // No shared agent: a pooled socket would outlive the request and make shutdown
     // wait on a connection nobody is using.
     const upstream = request(target, { method: req.method, headers: upstreamHeaders(req), agent: false, signal: controller.signal }, (response) => {
@@ -375,6 +392,14 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
         response.destroy();
         return;
       }
+      /*
+       * A body that stops before it is complete is the upstream failing, but the
+       * request object does not error with it - only the response does. Watching
+       * the response is what turns a silent truncation into a journal entry and a
+       * destroyed client socket; before this, the client saw a short body and the
+       * report said nothing had gone wrong.
+       */
+      finished(response).catch((error) => upstreamFault(String(error?.message ?? error)));
       const headers = {};
       for (const [key, value] of Object.entries(response.headers)) {
         if (value === undefined || HOP_BY_HOP.has(key)) continue;
@@ -384,15 +409,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       response.pipe(res);
     });
 
-    upstream.on("error", (error) => {
-      // An abort we caused is not an upstream fault, and journaling it would
-      // turn every cancelled request into an entry the report cannot explain.
-      if (!controller.signal.aborted) {
-        journal.append("upstream-error", { path: url.pathname, reason: String(error?.message ?? error) });
-      }
-      if (!res.headersSent) sendJson(res, 502, { error: "upstream-unreachable" });
-      else if (!res.destroyed) res.destroy();
-    });
+    upstream.on("error", (error) => upstreamFault(String(error?.message ?? error)));
 
     /*
      * The client hanging up must close the upstream side.
@@ -407,6 +424,7 @@ export function createProxy({ policy, journal, rules, now = () => Date.now() }) 
       // A finished response also closes the connection; only an unfinished one
       // means the client gave up before it had its answer.
       if (res.writableFinished) return;
+      clientGaveUp = true;
       req.unpipe(upstream);
       controller.abort();
       upstream.destroy();

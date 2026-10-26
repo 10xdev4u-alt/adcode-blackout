@@ -147,6 +147,17 @@ errors, so nothing cleans it up. `res.on("close")` on an unfinished response
 aborts and destroys the upstream request; without it, 40 cancelled calls left 40
 upstream sockets open.
 
+The other direction has the same shape. The request object errors when the
+connection fails before the headers, but a connection that drops *after* them
+only errors on the response, and the pipe destroys the response as it goes - so
+asking "did we abort?" answered yes and the fault was filed as a cancellation:
+the client got a 200 with half a body and the journal, the place upstream faults
+belong, stayed empty. Pass-through therefore watches the response to completion,
+and what decides whether a fault is recorded is whether the *client* went away,
+not the abort flag. One `upstream-error` entry per failed response, and the
+client's socket is destroyed rather than left hanging on a body that is not
+coming.
+
 The proxy binds loopback only. `policy.js` refuses any other host rather than
 clamping it, because a typo in a host is how a local tool becomes a public one.
 Every request must also name loopback in `Host`; anything else is `421` and a
