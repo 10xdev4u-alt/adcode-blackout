@@ -349,3 +349,22 @@ test("a clean exit with no traffic is explained as a second instance, not a brok
   // A build that stays up and says nothing gets no such excuse.
   assert.equal(judge({ entries: [], requests: 0, exit: stayed, seconds: 60 }).note, null);
 });
+
+test("a build that cannot be started is a failed check, with the binary named", () => {
+  // The app never ran, so nothing about the contract was tested. That has to be
+  // a launch failure that names the file, not an empty verdict a reader has to
+  // interpret.
+  const result = judge({ exit: { error: new Error("EACCES: permission denied") }, seconds: 30, appImage: "/tmp/fake.AppImage" });
+  const launch = result.checks.find((check) => check.name === "launch");
+  assert.equal(launch.state, "fail");
+  assert.match(launch.detail, /cannot start \/tmp\/fake\.AppImage: EACCES/);
+});
+
+test("a window outside one second to one hour is refused before anything starts", async () => {
+  for (const seconds of [0, -5, 3_601, 1.5]) {
+    await assert.rejects(
+      runCompat({ appImage: "/nonexistent/ADCode.AppImage", seconds, policy: parsePolicy({}), rules }),
+      /seconds must be an integer between 1 and 3600/,
+    );
+  }
+});

@@ -5,6 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  UNIT_NAME,
   WRAPPER_MARK,
   applicationsDir,
   forgetAppImage,
@@ -18,6 +19,7 @@ import {
   renderWrapper,
   resolveAppImage,
   restoreDesktopEntries,
+  unitEnabled,
   unitPath,
   wrapperPath,
 } from "../src/desktop.js";
@@ -209,4 +211,37 @@ test("an explicit path that cannot be used is named back, and is not second-gues
   // launching a different build than the one named is the worse answer.
   assert.equal(resolveAppImage({ home, env: {} }).path, usable);
   assert.equal(resolveAppImage({ home, env: {} }).rejected, undefined);
+});
+
+test("a wrapper that cannot be read is not ours", () => {
+  assert.equal(isOurWrapper(join(home, ".local", "bin", "adcode")), false, "a missing file is not ours");
+  const file = wrapperPath(home);
+  mkdirSync(join(home, ".local", "bin"), { recursive: true });
+  writeFileSync(file, "#!/bin/sh\necho someone else\n");
+  assert.equal(isOurWrapper(file), false, "and neither is one somebody else wrote");
+  writeFileSync(file, renderWrapper({ cli: "/opt/blackout/bin/blackout.js", home }));
+  assert.equal(isOurWrapper(file), true);
+});
+
+test("an entry that is not a regular file is left alone", () => {
+  const dir = applicationsDir(home);
+  mkdirSync(dir, { recursive: true });
+  // A directory wearing an entry's name, and a link to a build that is gone.
+  // Neither can be patched, and neither may be deleted by a patch that decided
+  // to "fix" what it found.
+  mkdirSync(join(dir, "adcode.desktop"), { recursive: true });
+  symlinkSync(join(home, "Applications", "gone.AppImage"), join(dir, "dangling.desktop"));
+  const app = APP("ADCode-2.4.0.AppImage");
+
+  assert.deepEqual(patchDesktopEntries({ home, appImage: app }), []);
+  assert.equal(lstatSync(join(dir, "adcode.desktop")).isDirectory(), true);
+  assert.equal(existsSync(join(dir, "dangling.desktop.blackout-backup")), false);
+});
+
+test("an enabled unit is visible in the wants directory", () => {
+  assert.equal(unitEnabled(home), false);
+  const wants = join(home, ".config", "systemd", "user", "default.target.wants");
+  mkdirSync(wants, { recursive: true });
+  writeFileSync(join(wants, UNIT_NAME), "");
+  assert.equal(unitEnabled(home), true);
 });

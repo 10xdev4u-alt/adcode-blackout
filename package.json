@@ -12,7 +12,7 @@
     "start": "node bin/blackout.js serve",
     "smoke": "node scripts/smoke.js",
     "surface": "node scripts/surface.js",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=79 --test-coverage-functions=94",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-lines=95.5 --test-coverage-branches=80.5 --test-coverage-functions=95",
     "soak": "node scripts/soak.js"
   },
   "engines": {
