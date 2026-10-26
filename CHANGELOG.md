@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- The refusals at the library edges are covered, one case each: a rule pack
+  nobody can honour (no name, no rules, a rule that is not an object, an invalid
+  id, an unknown action, no match, an invalid method, both a path and a pattern,
+  neither, a path that does not start with `/`, and two rules sharing an id), a
+  pack that states no version being version 1, a policy flag that is not a flag
+  (`enabled`, `dashboard`, and a pack name that is a path), a pid that is not a
+  process being not the proxy, a port that cannot exist having no owner, a lock
+  file that is not a claim, a claim with garbled port and time that keeps its
+  pid, a claim naming a process that is no longer the proxy, a claim that cannot
+  be removed reporting `false` instead of pretending, a journal that cannot be
+  written keeping the entry and its count and surfacing the failure, a state
+  directory that was never created reading as an empty journal, and a unit that
+  was never installed not being enabled. The floors move up with it: 96 line,
+  83 branch, 95 function.
 - The soak runs in CI on every pull request, at a rate a shared runner holds.
   It was the one gate that only ran when somebody remembered, and it is the only
   place a descriptor leak, a heap that only grows, counters that drift from what
