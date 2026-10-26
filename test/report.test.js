@@ -53,6 +53,22 @@ test("the text report names the state and the chain", () => {
   assert.match(text, /journal chain/);
 });
 
+test("the text report lists the endpoints seen outside the rules", () => {
+  const withEndpoints = formatReport(buildReport([
+    entry("serve-blocked"),
+    entry("endpoint-seen", { method: "POST", path: "/v1/ads" }),
+    entry("endpoint-seen", { method: "GET", path: "/v1/extra" }),
+  ], { policy, now: 2_000 }));
+  assert.match(withEndpoints, /endpoints seen outside the rules/);
+  assert.match(withEndpoints, /POST \/v1\/ads/);
+  assert.match(withEndpoints, /GET \/v1\/extra/);
+
+  // The section is a finding, not a fixture: with nothing unclassified the
+  // report has no heading for an empty list.
+  const plain = formatReport(buildReport([entry("serve-blocked")], { policy, now: 2_000 }));
+  assert.doesNotMatch(plain, /endpoints seen outside the rules/);
+});
+
 test("the text report says when the journal file stopped accepting writes", () => {
   const text = formatReport(buildReport([entry("serve-blocked")], {
     policy,

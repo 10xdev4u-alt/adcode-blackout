@@ -202,6 +202,7 @@ No dependencies, no build step.
 ```sh
 npm test                 # the whole suite, node:test
 npm run surface          # every command, in every state it can meet
+npm run coverage         # the suite under its line, branch and function floors
 node bin/blackout.js help
 node scripts/smoke.js    # proxy + contract calls + a report, no app needed
 ```
