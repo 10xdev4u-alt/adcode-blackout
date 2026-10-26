@@ -26,6 +26,17 @@ import { VERSION } from "./version.js";
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const BODY_LIMIT = 2 * 1024 * 1024;
+/**
+ * How long a client may take to deliver a body it announced.
+ *
+ * A stalled body is cheap to open and expensive to hold, and it is the one
+ * request shape that asks for nothing: the client sent headers and stopped.
+ * `drain` already said this much for the blocked paths; the receipts path used
+ * to answer nothing at all, so the socket sat there until Node's own five-minute
+ * request timeout closed it - no answer to the client, no resource back. Same
+ * length as the drain deadline, which is what the writer of that one chose.
+ */
+const BODY_TIMEOUT_MS = 2_000;
 const CONFIG_TIMEOUT_MS = 8_000;
 /**
  * How much of a config response is worth reading.
@@ -90,26 +101,45 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function readBody(req, limit = BODY_LIMIT) {
+function readBody(req, { limit = BODY_LIMIT, timeoutMs = BODY_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     let stopped = false;
+    const done = () => {
+      stopped = true;
+      clearTimeout(timer);
+      req.off("end", onEnd);
+      req.off("error", onError);
+    };
+    const onEnd = () => { if (!stopped) { done(); resolve(Buffer.concat(chunks)); } };
+    const onError = (error) => { if (!stopped) { done(); reject(error); } };
+    // A body that never arrives is answered as a timeout rather than waited out.
+    // The request keeps being read afterwards so the answer can be delivered on
+    // a socket that is not reset - the same reason the too-large case drains.
+    const timer = setTimeout(() => {
+      if (stopped) return;
+      done();
+      chunks.length = 0;
+      req.resume();
+      reject(Object.assign(new Error("body timeout"), { status: 408 }));
+    }, timeoutMs);
+    timer.unref?.();
     req.on("data", (chunk) => {
       if (stopped) return;
       size += chunk.length;
       if (size > limit) {
         // Keep draining rather than destroying the socket: the caller still owes
         // the client a 413, and a reset looks like a network fault instead.
-        stopped = true;
+        done();
         chunks.length = 0;
         reject(Object.assign(new Error("body too large"), { status: 413 }));
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => { if (!stopped) resolve(Buffer.concat(chunks)); });
-    req.on("error", reject);
+    req.on("end", onEnd);
+    req.on("error", onError);
   });
 }
 
