@@ -1,6 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createJournal, GENESIS, readJournal, readJournalChain, summarize, verifyChain } from "../src/journal.js";
@@ -17,6 +17,30 @@ function tempJournal() {
   dirs.push(dirname(path));
   return path;
 }
+
+test("a crash between the rotation rename and the new live file resumes cleanly", () => {
+  /*
+   * Rotation is two syscalls: rename the live file to a segment, then create an
+   * empty one. A process killed between them leaves no live file at all, and
+   * the next start has to continue the chain from the segment rather than treat
+   * the history as missing and begin again at genesis.
+   */
+  const path = tempJournal();
+  const first = createJournal(path, { maxBytes: 200 });
+  for (let index = 0; index < 4; index += 1) first.append("serve-blocked", { index });
+  renameSync(path, join(dirname(path), "journal.9999.jsonl"));
+
+  const resumed = createJournal(path, { maxBytes: 200 });
+  resumed.append("resumed", {});
+
+  const chain = readJournalChain(path);
+  assert.deepEqual(verifyChain(chain), { ok: true, brokenAt: null });
+  // Sequence numbers keep counting across the gap in the file names, and the
+  // high-numbered segment sorts after the ones that came before it.
+  assert.equal(chain.at(-1).seq, chain.length - 1);
+  assert.equal(chain.at(-1).kind, "resumed");
+  assert.equal(resumed.head(), chain.at(-1).hash);
+});
 
 test("a fresh chain starts at genesis and verifies", () => {
   const journal = createJournal();

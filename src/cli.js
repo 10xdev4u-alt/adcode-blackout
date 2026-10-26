@@ -17,6 +17,7 @@ import { VERSION } from "./version.js";
 import { probe, proxyUrl, ensureProxy, launchApp, writePid, removePid } from "./launch.js";
 import { formatCompat, runCompat } from "./compat.js";
 import { describePid, isBlackoutPid, listenerPid } from "./netinfo.js";
+import { acquireLock, inspectLock, releaseLock } from "./lock.js";
 import {
   installWrapper,
   removeWrapper,
@@ -131,22 +132,18 @@ function journalOrEmpty() {
   return existsSync(path) ? readJournalChain(path) : [];
 }
 
-async function commandServe(values) {
-  const base = readPolicy();
-  const policy = parsePolicy({ ...base, ...(values.port === undefined ? {} : { port: Number(values.port) }) });
-  ensureHome();
-
-  const journal = createJournal(journalPath());
-  let rules;
+/**
+ * The active pack, with the documented fallback for a broken `core` override.
+ *
+ * A typo in a user pack must not turn the blocker off: for `core` there is the
+ * bundled copy to serve instead. A custom pack has no fallback, and is a
+ * configuration error worth stopping for.
+ */
+function rulesWithFallback(policy, journal) {
   try {
-    rules = loadRulePack(policy.rules);
+    return loadRulePack(policy.rules);
   } catch (error) {
-    // The user override is broken. For `core` there is a known-good pack to
-    // fall back to, and blocking is the whole point - so a typo must not turn
-    // the blocker off at startup. A custom pack has no such fallback and is a
-    // configuration error worth stopping for.
     if (policy.rules !== "core") throw error;
-    rules = loadRulePack("core", bundledRulePath("core"));
     journal.append("rules-rejected", {
       name: "core",
       reason: String(error.message ?? error),
@@ -154,10 +151,40 @@ async function commandServe(values) {
     });
     console.error(`blackout: ${String(error.message ?? error)}`);
     console.error("blackout: using the bundled core pack; fix the override and send SIGHUP");
+    return loadRulePack("core", bundledRulePath("core"));
   }
-  const proxy = createProxy({ policy, journal, rules });
+}
+
+async function commandServe(values) {
+  const base = readPolicy();
+  const policy = parsePolicy({ ...base, ...(values.port === undefined ? {} : { port: Number(values.port) }) });
+  ensureHome();
+
+  /*
+   * One state directory, one writer. Without this, `serve --port A` and
+   * `serve --port B` both appended to the same journal with separate chains and
+   * `verify` then reported a break the tool had caused itself. The check comes
+   * before the journal is opened, because opening it is already a repair. A
+   * second `serve` for the port that is already answering stays idempotent.
+   */
+  const running = await probe(proxyUrl(policy));
+  const holder = inspectLock();
+  if (holder !== null) {
+    if (running !== null) {
+      console.log(`blackout already running at ${proxyUrl(policy)}`);
+      return 0;
+    }
+    return fail(
+      `another proxy is writing ${stateHome()} (pid ${holder.pid}${holder.port === null ? "" : ` on port ${holder.port}`})\n` +
+        "stop it first, or point BLACKOUT_STATE at a different directory",
+    );
+  }
 
   if (values.detach) {
+    // Validate before spawning, so a broken custom pack names its file here
+    // instead of "the proxy did not come up". The child repeats this work; the
+    // parent's only other job is the health poll.
+    rulesWithFallback(policy, createJournal(journalPath()));
     const child = await import("node:child_process").then(({ spawn }) =>
       spawn(process.execPath, [CLI, "serve", "--foreground", "--port", String(policy.port)], {
         detached: true,
@@ -176,9 +203,27 @@ async function commandServe(values) {
     return 0;
   }
 
+  /*
+   * Claim the state directory before the journal is opened. `createJournal`
+   * reads the chain and repairs a torn final line, so a second starter that got
+   * this far would already be writing to a file it does not own.
+   */
+  const claim = acquireLock({ port: policy.port });
+  if (!claim.ok) {
+    return fail(
+      `another proxy is writing ${stateHome()} (pid ${claim.holder?.pid ?? "?"}${claim.holder?.port == null ? "" : ` on port ${claim.holder.port}`})\n` +
+        "stop it first, or point BLACKOUT_STATE at a different directory",
+    );
+  }
+
+  const journal = createJournal(journalPath());
+  const rules = rulesWithFallback(policy, journal);
+  const proxy = createProxy({ policy, journal, rules });
+
   try {
     await proxy.listen(policy.port, policy.host);
   } catch (error) {
+    releaseLock();
     if (error?.code === "EADDRINUSE") {
       const health = await probe(proxyUrl(policy));
       if (health !== null) {
@@ -193,6 +238,7 @@ async function commandServe(values) {
   writePid(process.pid);
   const stop = async () => {
     removePid();
+    releaseLock();
     // Long enough for an answer that is already on its way, short enough that a
     // stuck client cannot make `systemctl restart` wait forever.
     await proxy.close({ graceMs: SHUTDOWN_GRACE_MS });

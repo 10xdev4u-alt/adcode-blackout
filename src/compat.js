@@ -266,6 +266,14 @@ export async function runCompat({ appImage, args = [], seconds = 60, policy, rul
     // A clean pass is reproducible from the run's output; a failure is worth
     // reading afterwards, so its journal and app log are kept.
     const retained = keep || result.verdict !== "pass";
+    /*
+     * The journal is written lazily, on the first decision. A build that never
+     * called therefore has no file - and printing "journal kept /tmp/..." for a
+     * path that does not exist sends the reader to an empty shell prompt. The
+     * retained directory is a diagnostic, so it always contains the thing the
+     * message promises.
+     */
+    if (retained) closeSync(openSync(journalPath, "a"));
     result.journalPath = retained ? journalPath : null;
     result.appLogPath = retained ? logPath : null;
     if (!retained) rmSync(dir, { recursive: true, force: true });

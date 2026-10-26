@@ -119,8 +119,12 @@ validation failure - and a new response shape is a small, testable change.
    `rules-rejected` and the old pack keeps running.
 
 3. If it belongs in the project, add a test in `test/rules.test.js` and a proxy
-   test for the response, then `npm test && node scripts/smoke.js`.
-4. Launch the stock AppImage and confirm `servesBlocked` moves.
+   test for the response, then `npm test && node scripts/smoke.js && npm run
+   surface`.
+4. Check it against the stock build with `blackout compat --seconds 60`. The
+   long form - launch it yourself and watch `servesBlocked` move - is still in
+   [EVIDENCE.md](EVIDENCE.md) for the first run, when you want to see the window
+   as well as the verdict.
 
 The rule file is data on purpose: this is a reviewable JSON change, not a
 release of a patched binary, and SIGHUP means it does not even need a restart.

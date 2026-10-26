@@ -28,6 +28,19 @@ and you have the whole development loop.
 
 Run `node scripts/smoke.js` before touching a real install.
 
+Before a release, walk the whole CLI surface:
+
+```sh
+npm run surface
+```
+
+It runs every command in three states - nothing running, running, paused -
+against a throwaway HOME on its own port, and fails on an exit code that
+contradicts the README, JSON that does not parse, a config write that was
+silently refused, or a stack trace where a sentence belongs. The unit tests
+check commands one at a time; this checks that the tool still behaves like a
+tool when someone uses it.
+
 For a change to request handling, run the soak as well:
 
 ```sh

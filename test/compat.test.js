@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 import { formatCompat, judge, runCompat } from "../src/compat.js";
 import { parsePolicy } from "../src/policy.js";
 import { loadRulePack } from "../src/rules.js";
@@ -212,6 +213,11 @@ test("a build that dies is judged fail by the runner, and keeps its log", async 
   assert.match(launch.detail, /code 3/);
   assert.ok(result.journalPath !== null);
   assert.ok(result.appLogPath !== null);
+  // The build made no request, so the journal was never written. A retained
+  // run still has to contain the file its output points at: "journal kept" for
+  // a path that does not exist is worse than saying nothing.
+  assert.ok(existsSync(result.journalPath));
+  assert.ok(existsSync(result.appLogPath));
   discardRetained(result);
 });
 
