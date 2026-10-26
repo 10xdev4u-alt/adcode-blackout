@@ -8,7 +8,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProxy } from "../src/proxy.js";
-import { createJournal } from "../src/journal.js";
+import { createJournal, GENESIS } from "../src/journal.js";
 import { parsePolicy } from "../src/policy.js";
 import { loadRulePack } from "../src/rules.js";
 
@@ -728,5 +728,126 @@ test("a rule can pass a path through, and the upstream's answer comes back", asy
   } finally {
     await other.close();
     rmSync(dir2, { recursive: true, force: true });
+  }
+});
+
+test("a client that hangs up before the upstream answers does not leave the upstream body open", async () => {
+  /*
+   * The client is gone by the time the upstream speaks. Piping into a socket
+   * nobody is reading keeps that upstream body - and its descriptors - alive for
+   * as long as the upstream feels like streaming, which for a slow endpoint is
+   * the rest of its answer. The proxy destroys it instead, so the observable
+   * difference is how much of the answer the upstream manages to write.
+   */
+  let written = 0;
+  const slow = createServer((req, res) => {
+    setTimeout(() => {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      const ticker = setInterval(() => {
+        written += 1;
+        if (written > 60) {
+          clearInterval(ticker);
+          res.end();
+          return;
+        }
+        if (!res.write(Buffer.alloc(16 * 1024, 120))) {
+          clearInterval(ticker);
+          return;
+        }
+      }, 10);
+      res.on("close", () => clearInterval(ticker));
+      res.on("error", () => clearInterval(ticker));
+    }, 400);
+  });
+  await new Promise((resolve) => slow.listen(0, "127.0.0.1", resolve));
+
+  const ownJournal = createJournal();
+  const own = createProxy({ policy: parsePolicy({ port: 0, upstream: `http://127.0.0.1:${slow.address().port}` }), journal: ownJournal, rules });
+  const url = await own.listen(0, "127.0.0.1");
+  try {
+    const socket = connect(Number(new URL(url).port), "127.0.0.1");
+    socket.on("error", () => {});
+    await new Promise((resolve) => socket.once("connect", resolve));
+    socket.write("GET /v1/balance HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    socket.destroy();
+
+    // The upstream starts at 400ms and streams for ~600ms if nobody stops it.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    assert.ok(written < 30, `the upstream wrote ${written} of 60 chunks into a socket with no reader`);
+    assert.equal(ownJournal.entries.some((entry) => entry.kind === "upstream-error"), false, "an abort we caused is not an upstream fault");
+    const health = await (await fetch(`${url}/_blackout/health`)).json();
+    assert.equal(health.ok, true, "the proxy is still serving");
+  } finally {
+    slow.closeAllConnections?.();
+    await new Promise((resolve) => slow.close(resolve));
+    await own.close();
+  }
+});
+
+test("an upstream that dies mid-response truncates the answer instead of writing a 502 over it", async () => {
+  const dies = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.write('{"availableMicros":"1080');
+    setTimeout(() => res.socket?.destroy(), 60);
+  });
+  await new Promise((resolve) => dies.listen(0, "127.0.0.1", resolve));
+
+  const ownJournal = createJournal();
+  const own = createProxy({ policy: parsePolicy({ port: 0, upstream: `http://127.0.0.1:${dies.address().port}` }), journal: ownJournal, rules });
+  const url = await own.listen(0, "127.0.0.1");
+  try {
+    // A raw socket, because the point is what the bytes look like: headers
+    // already went out, so the client's answer must end where the upstream did.
+    const answer = await new Promise((resolve) => {
+      const socket = connect(Number(new URL(url).port), "127.0.0.1");
+      let text = "";
+      socket.on("error", () => resolve(text));
+      socket.on("connect", () => socket.write("GET /v1/balance HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"));
+      socket.on("data", (chunk) => (text += chunk.toString()));
+      socket.on("close", () => resolve(text));
+      setTimeout(() => { socket.destroy(); resolve(text); }, 2_000);
+    });
+    assert.match(answer, /HTTP\/1\.1 200/);
+    assert.match(answer, /\{"availableMicros":"1080/, "the bytes that did arrive were the upstream's");
+    assert.doesNotMatch(answer, /upstream-unreachable/, "a 502 after headers is not an answer, it is a second one");
+    const faults = ownJournal.entries.filter((entry) => entry.kind === "upstream-error");
+    assert.equal(faults.length, 1, "the fault is recorded, not hidden");
+  } finally {
+    dies.closeAllConnections?.();
+    await new Promise((resolve) => dies.close(resolve));
+    await own.close();
+  }
+});
+
+test("a journal that throws while recording is a named 500, not a hung socket", async () => {
+  /*
+   * The decision is made and then the record of it fails. That must not take the
+   * answer with it: `handle` is called inside a catch that turns any escape into
+   * a named 500, and the proxy keeps serving afterwards.
+   */
+  const hostile = {
+    entries: [],
+    integrity: { ok: true, brokenAt: null },
+    writeError: null,
+    subscribers: 0,
+    head: () => GENESIS,
+    summary: () => ({ total: 0, retained: 0, counts: {}, receipts: 0, endpoints: [], firstAt: null, lastAt: null }),
+    subscribe: () => () => {},
+    append: () => { throw new Error("the record is not writable"); },
+  };
+  const own = createProxy({ policy: parsePolicy({ port: 0, upstream: upstreamOrigin }), journal: hostile, rules });
+  const url = await own.listen(0, "127.0.0.1");
+  try {
+    const blocked = await fetch(`${url}/v1/serve`, { method: "POST", body: "{}" });
+    assert.equal(blocked.status, 500);
+    const body = await blocked.json();
+    assert.equal(body.error, "blackout-failure");
+    assert.match(body.detail, /the record is not writable/);
+
+    const health = await fetch(`${url}/_blackout/health`);
+    assert.equal(health.status, 200, "one failed decision is not the end of the proxy");
+  } finally {
+    await own.close();
   }
 });
