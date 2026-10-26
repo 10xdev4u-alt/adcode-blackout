@@ -53,11 +53,15 @@ export function inspectLock({ path = lockPath(), isProxy = isBlackoutPid } = {})
  * a refusal, because spinning here would just hide the conflict.
  */
 export function acquireLock({ port = null, path = lockPath(), pid = process.pid, isProxy = isBlackoutPid } = {}) {
-  const body = `${JSON.stringify({ pid, port, at: Date.now() })}\n`;
+  // One timestamp for the file and the answer: a caller that compares the claim
+  // it was given against the claim on disk must not see two readings of the
+  // clock, and neither should a reader of the file.
+  const at = Date.now();
+  const body = `${JSON.stringify({ pid, port, at })}\n`;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       writeFileSync(path, body, { flag: "wx", mode: 0o600 });
-      return { ok: true, holder: { pid, port, at: Date.now() } };
+      return { ok: true, holder: { pid, port, at } };
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
       const holder = readClaim(path);

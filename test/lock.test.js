@@ -25,6 +25,17 @@ test("a free state directory is claimed, and the claim names the port", () => {
   assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { pid: 4242, port: 8790, at: claim.holder.at });
 });
 
+test("the claim returned is the claim on disk, reading the clock once", () => {
+  // The holder used to carry a second `Date.now()`, so a claim could name a
+  // time the file did not - and a caller comparing the two saw a difference of
+  // one millisecond that no state change explains.
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const path = lockFile();
+    const claim = acquireLock({ path, port: 8790, pid: 4242 });
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), claim.holder);
+  }
+});
+
 test("a live claim is refused, and names who holds it", () => {
   const path = lockFile();
   acquireLock({ path, port: 8790, pid: 4242 });
