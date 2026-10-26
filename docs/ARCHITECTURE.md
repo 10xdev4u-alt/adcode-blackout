@@ -36,7 +36,11 @@ adcode  (wrapper)
 2. **A blocked receipt is acknowledged.** ADCode's receipt queue only drains on
    an `acked` array. Dropping the request leaves it retrying forever; acking the
    valid ids and discarding them is both quieter and honest - nothing is
-   claimed.
+   claimed. A body that never finishes is refused (`408`) instead of waited out:
+   both readers - the drain on the blocked paths and the receipts body - carry
+   the same two-second deadline, because a client that sends headers and stops
+   is the one request shape that costs a socket and asks for nothing. It is not
+   a decision, so nothing is journaled for it.
 3. **An ad failure costs an ad, never an editor.** Proxy start failure, a busy
    port, a malformed upstream response: each degrades to either the safe config
    or an unprotected launch with a warning. Editing, the terminal and the

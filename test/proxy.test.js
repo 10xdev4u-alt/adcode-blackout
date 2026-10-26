@@ -557,13 +557,66 @@ test("a body over the limit is refused rather than buffered", async () => {
   assert.equal(res.status, 413);
 });
 
+test("a receipts body that never arrives is answered, not parked", async () => {
+  /*
+   * The one request shape that asks for nothing: headers, an announced length,
+   * and silence. The blocked path has had a deadline since the drain was
+   * written; this path answered nothing at all, so the socket sat holding the
+   * request, the buffers and the pending answer until Node's own five-minute
+   * request timeout - and the client never learned why.
+   */
+  const socket = connect(Number(new URL(proxy.url).port), "127.0.0.1");
+  socket.on("error", () => {});
+  let answer = "";
+  socket.on("data", (chunk) => (answer += chunk.toString()));
+  socket.write('POST /v1/receipts HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-type: application/json\r\ncontent-length: 4096\r\n\r\n{"receipts":[');
+  const deadline = Date.now() + 6_000;
+  while (!answer.includes("\r\n\r\n") && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.match(answer, /^HTTP\/1\.1 408/, `no answer: ${JSON.stringify(answer.slice(0, 60))}`);
+  assert.match(answer, /body timeout/);
+  socket.destroy();
+
+  // A stalled client costs one answer, not the proxy.
+  const after = await fetch(`${proxy.url}/v1/receipts`, { method: "POST", body: JSON.stringify({ receipts: [{ receiptId: "r-after" }] }) });
+  assert.equal(after.status, 200);
+  assert.deepEqual(await after.json(), { acked: ["r-after"] });
+});
+
+test("a client that abandons a receipts body mid-way costs the proxy nothing", async () => {
+  // The other half of a body that never finishes: the client stops sending and
+  // hangs up. The request errors with ECONNRESET, the answer has nowhere to go,
+  // and what must not happen is a promise nobody settles, a timer left behind,
+  // or a decision written for a body that never arrived.
+  const before = journal.entries.filter((entry) => entry.kind === "receipt-blocked").length;
+  const socket = connect(Number(new URL(proxy.url).port), "127.0.0.1");
+  socket.on("error", () => {});
+  socket.write("POST /v1/receipts HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-type: application/json\r\ncontent-length: 4096\r\n\r\n{\"receipts\":[{\"receiptId\":\"half\"}");
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  socket.destroy();
+  // Long enough for the deadline to have passed, so a pending timer would have
+  // fired and a hung promise would still be hanging.
+  await new Promise((resolve) => setTimeout(resolve, 2_400));
+
+  assert.equal(journal.entries.filter((entry) => entry.kind === "receipt-blocked").length, before, "a body that never arrived is not a decision");
+  const res = await fetch(`${proxy.url}/v1/receipts`, { method: "POST", body: JSON.stringify({ receipts: [{ receiptId: "r-later" }] }) });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { acked: ["r-later"] });
+});
+
 test("a large serve body is consumed, so the connection can be reused", async () => {
   // The client posts its context with the serve call. If the proxy answers
   // without reading that body, Node destroys the socket afterwards: every
   // request costs a new connection, and a response can be cut off mid-flight.
+  //
+  // A megabyte, not eight: the claim is that the body was consumed before the
+  // answer, and eight megabytes on a starved runner can outlive the drain's
+  // own two-second deadline - which is the drain doing its job, and left this
+  // test failing on Node 20 whenever the runner was busy. What is measured is
+  // the reuse, and a body three thousand times larger than the ad context
+  // measures it the same way.
   const { Agent } = await import("node:http");
   const agent = new Agent({ keepAlive: true, maxSockets: 1 });
-  const body = "x".repeat(8 * 1024 * 1024);
+  const body = "x".repeat(1024 * 1024);
 
   const post = () => new Promise((resolve, reject) => {
     const req = httpRequest({ host: "127.0.0.1", port: proxy.server.address().port, path: "/v1/serve", method: "POST", agent, headers: { "content-length": body.length } }, (res) => {

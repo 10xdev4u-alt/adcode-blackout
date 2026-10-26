@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- A receipts body that never arrives is refused instead of parked. The drain on
+  the blocked paths has had a two-second deadline since it was written; the
+  receipts path had none, so a client that sent headers, an announced length and
+  nothing else got no answer at all and held the request, its buffers and the
+  pending response until Node's own five-minute request timeout closed the
+  socket. `readBody` now carries the same deadline and answers `408` with
+  `body timeout`, and keeps reading afterwards so the refusal is delivered on a
+  socket that is not reset. The two tests are the two halves of a body that
+  never finishes: one stalls and is answered in ~2s, the other abandons the body
+  and must cost the proxy nothing - no decision written for it, no timer left
+  behind, the next request answered normally. Before this, the stalled case
+  answered nothing at all (`no answer: ""` after six seconds).
 - An upstream that dies mid-response is a fault again, not a silent truncation.
   The request object does not error when the connection drops after the headers,
   only the response does, and the one check that existed asked whether *our*
