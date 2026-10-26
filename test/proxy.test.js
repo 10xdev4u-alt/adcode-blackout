@@ -607,9 +607,16 @@ test("a large serve body is consumed, so the connection can be reused", async ()
   // The client posts its context with the serve call. If the proxy answers
   // without reading that body, Node destroys the socket afterwards: every
   // request costs a new connection, and a response can be cut off mid-flight.
+  //
+  // A megabyte, not eight: the claim is that the body was consumed before the
+  // answer, and eight megabytes on a starved runner can outlive the drain's
+  // own two-second deadline - which is the drain doing its job, and left this
+  // test failing on Node 20 whenever the runner was busy. What is measured is
+  // the reuse, and a body three thousand times larger than the ad context
+  // measures it the same way.
   const { Agent } = await import("node:http");
   const agent = new Agent({ keepAlive: true, maxSockets: 1 });
-  const body = "x".repeat(8 * 1024 * 1024);
+  const body = "x".repeat(1024 * 1024);
 
   const post = () => new Promise((resolve, reject) => {
     const req = httpRequest({ host: "127.0.0.1", port: proxy.server.address().port, path: "/v1/serve", method: "POST", agent, headers: { "content-length": body.length } }, (res) => {
