@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- The soak runs in CI on every pull request, at a rate a shared runner holds.
+  It was the one gate that only ran when somebody remembered, and it is the only
+  place a descriptor leak, a heap that only grows, counters that drift from what
+  was sent, or a chain that stops verifying can show up at all.
+- More of the record and the request path is covered, each with the case it is
+  there for: a name where a segment should be is reported rather than read
+  around, a rotation that cannot happen (a state directory that cannot be
+  written) leaves a degraded record rather than a stopped blocker, a live file
+  removed underneath keeps counting, a torn tail in a file that cannot be
+  repaired is dropped and the loss reported, `retainEntries` is validated, a
+  policy that is not an object is refused by name, a wrapper that cannot be read
+  is not ours, desktop entries that are not regular files are left alone rather
+  than deleted, `unitEnabled` reads the wants directory, a launch failure names
+  the binary, a window outside 1s-1h is refused before anything starts, an
+  unknown control path is a 404, a Host header the URL parser cannot read is a
+  421, and a `pass` rule forwards to the upstream and returns its bytes. The
+  floors move up with it: 95.5 line, 80.5 branch, 95 function.
 - The suite now covers the refusals, which were the paths with no test: a
   foreground start in a state directory another proxy owns, a port held by
   something that is not the proxy (and the claim it must release on the way

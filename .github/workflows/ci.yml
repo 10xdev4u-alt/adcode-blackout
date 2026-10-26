@@ -43,3 +43,17 @@ jobs:
         with:
           node-version: "24"
       - run: npm run coverage
+
+  # The unit tests see one request at a time. This is the only job that watches a
+  # proxy under load: a descriptor count that does not settle, a heap that only
+  # grows, counters that drift from what was sent, a chain that stops verifying.
+  # The rate is deliberately low - on a shared runner the point is the
+  # invariants, not the throughput, and a rate gate that cries wolf gets ignored.
+  soak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node scripts/soak.js --seconds 20 --rate 25

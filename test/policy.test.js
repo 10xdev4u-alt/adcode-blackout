@@ -59,3 +59,16 @@ test("a policy round-trips through disk", () => {
   assert.deepEqual(loaded, saved);
   assert.equal(loaded.port, 8791);
 });
+
+test("a policy that is not an object is refused by name", () => {
+  // The config file is JSON, but `parsePolicy` is also the validator every
+  // caller passes a merged object through: an array or a scalar arriving here
+  // means a bug upstream, and the message says which one it is.
+  for (const value of [null, [], 42, "core"]) {
+    assert.throws(() => parsePolicy(value), (error) => {
+      assert.equal(error.message, "policy must be an object");
+      return true;
+    });
+  }
+  assert.equal(parsePolicy({}).port, 8790, "and the absent argument still means defaults");
+});

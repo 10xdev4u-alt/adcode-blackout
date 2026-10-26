@@ -50,7 +50,8 @@ silently refused, or a stack trace where a sentence belongs. The unit tests
 check commands one at a time; this checks that the tool still behaves like a
 tool when someone uses it.
 
-For a change to request handling, run the soak as well:
+For a change to request handling, run the soak as well - CI runs a short one on
+every pull request, and this is the longer version to run before a release:
 
 ```sh
 node scripts/soak.js --seconds 60 --rate 25

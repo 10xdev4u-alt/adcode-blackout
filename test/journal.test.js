@@ -1,6 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createJournal, GENESIS, readJournal, readJournalChain, summarize, verifyChain } from "../src/journal.js";
@@ -299,4 +299,89 @@ test("a write failure leaves a gap that verify reports after a restart", () => {
   // Entries 0 and 1 never reached disk. Renumbering would hide that; naming the
   // gap is the honest reading, and `verify` does exactly that.
   assert.deepEqual(verifyChain(onDisk), { ok: false, brokenAt: 0 });
+});
+
+test("a name where a segment should be is reported, not read around", () => {
+  /*
+   * Whatever sits at a segment name is part of the record. Opening must not
+   * skip it and carry on: a directory there means the journal cannot be read,
+   * and the message has to name the path rather than surfacing a driver error
+   * from somewhere further along.
+   */
+  const path = tempJournal();
+  mkdirSync(join(dirname(path), "journal.0001.jsonl"));
+  assert.throws(() => createJournal(path), /cannot read journal .*journal\.0001\.jsonl/);
+});
+
+test("a rotation that cannot happen leaves a degraded record, not a stopped blocker", (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root renames inside a directory it cannot write to");
+    return;
+  }
+  /*
+   * Rotation renames the live file and creates a new one, so it needs to write
+   * in the directory. A read-only state directory - a restore that came back
+   * with different ownership, a read-only mount - makes that fail while appends
+   * to the existing file still work. The record is then degraded and says so,
+   * and the decisions keep being made, counted and chained.
+   */
+  const path = tempJournal();
+  const journal = createJournal(path, { maxBytes: 200 });
+  journal.append("serve-blocked", { index: 1 });
+  chmodSync(dirname(path), 0o500);
+  try {
+    for (let index = 2; index <= 4; index += 1) journal.append("serve-blocked", { index });
+    assert.notEqual(journal.writeError, null, "the failed rotation is recorded");
+    assert.match(journal.writeError.message, /EACCES|EPERM/);
+    assert.equal(journal.summary().total, 4, "every decision still counted");
+  } finally {
+    chmodSync(dirname(path), 0o700);
+  }
+
+  const chain = readJournalChain(path);
+  assert.equal(chain.length, 4, "the live file kept growing, and nothing was lost");
+  assert.deepEqual(verifyChain(chain), { ok: true, brokenAt: null });
+});
+
+test("a retention that is not a positive number is refused", () => {
+  for (const retainEntries of [0, -1, 1.5, Number.NaN]) {
+    assert.throws(() => createJournal(null, { retainEntries }), /retainEntries must be a positive integer/);
+  }
+  assert.equal(createJournal(null, { retainEntries: 1 }).summary().retained, 0, "a valid one is accepted");
+});
+
+test("a live file removed underneath is reported, not fatal", () => {
+  const path = tempJournal();
+  const journal = createJournal(path);
+  journal.append("serve-blocked", { index: 1 });
+
+  // The rotation check stats the live file before it does anything; with the
+  // file gone that read fails, and the append that follows has to carry on.
+  rmSync(path, { force: true });
+  journal.append("serve-blocked", { index: 2 });
+
+  assert.equal(journal.summary().total, 2);
+  assert.equal(readJournalChain(path).length, 1, "the file is back with the decision made after it vanished");
+});
+
+test("a torn tail in a file that cannot be repaired is dropped, and the loss is reported", (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root writes a read-only file, so the repair cannot fail here");
+    return;
+  }
+  const path = tempJournal();
+  // A crash leaves half an entry; the file is then read-only, so the truncate
+  // that would remove it fails. Opening must still work - the tail is ignored
+  // by `readJournal` either way - and the append must say it could not write.
+  writeFileSync(path, '{"seq":0,"kind":"serve-blocked","data":{"half"');
+  chmodSync(path, 0o400);
+  try {
+    const journal = createJournal(path);
+    assert.equal(journal.entries.length, 0, "the fragment is not claimed as an entry");
+    journal.append("serve-blocked", { after: true });
+    assert.notEqual(journal.writeError, null, "the append that could not land is recorded");
+    assert.equal(journal.summary().total, 1, "and the decision itself is still counted");
+  } finally {
+    chmodSync(path, 0o600);
+  }
 });

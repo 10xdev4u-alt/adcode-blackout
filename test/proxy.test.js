@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { mkdtemp } from "node:fs/promises";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -675,4 +675,58 @@ test("a pre-compressed response is not decoded, re-encoded or relabelled", async
   const { headers, body } = await rawGet("/v1/gzip");
   assert.equal(headers["content-encoding"], "gzip");
   assert.equal(gunzipSync(body).toString("utf8"), "hello hello hello");
+});
+
+test("an unknown control path is a 404, not a 500", async () => {
+  const res = await fetch(`${proxy.url}/_blackout/nonsense`);
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: "not-found" });
+});
+
+test("a Host header that is not even a host is rejected as such", async () => {
+  // `evil.example` is a well-formed authority that is not loopback, and that
+  // case is covered above. This is the other one: a header the URL parser
+  // cannot read at all. Both are refused, and neither may be a crash.
+  const status = await new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: "127.0.0.1", port: proxy.server.address().port, path: "/v1/config", headers: { host: "[::1" } },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+  assert.equal(status, 421);
+});
+
+test("a rule can pass a path through, and the upstream's answer comes back", async () => {
+  // `pass` is an action a pack can choose: the path then behaves as if no rule
+  // matched. It is the escape hatch for a call the pack wants to watch from the
+  // report without changing, so it has to reach the upstream and return its
+  // bytes rather than a rewritten answer.
+  const dir2 = await mkdtemp(join(tmpdir(), "blackout-pass-"));
+  const pack = join(dir2, "pass-pack.json");
+  writeFileSync(pack, JSON.stringify({
+    name: "pass-pack",
+    version: 1,
+    rules: [{ id: "balance-through", match: { method: "GET", path: "/v1/balance" }, action: "pass" }],
+  }));
+  const other = createProxy({
+    policy: parsePolicy({ upstream: upstreamOrigin }),
+    journal: createJournal(join(dir2, "journal.jsonl")),
+    rules: loadRulePack("pass-pack", pack),
+  });
+  await other.listen(0, "127.0.0.1");
+  try {
+    const before = hits.balance;
+    const res = await fetch(`${other.url}/v1/balance`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { availableMicros: "1080000", lifetimeMicros: "5400000" });
+    assert.equal(hits.balance, before + 1, "the request reached the upstream");
+  } finally {
+    await other.close();
+    rmSync(dir2, { recursive: true, force: true });
+  }
 });
