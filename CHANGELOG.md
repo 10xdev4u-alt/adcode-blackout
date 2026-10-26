@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Six of the CLI's paths that no test ran are covered, each with the scenario a
+  person actually hits: a launch whose proxy cannot start still starts the
+  editor (with the reason and the log named), `events --once` picks the latest
+  decision rather than the first of the replay, an event follower survives the
+  proxy restarting under it and stops with exit 0 on Ctrl-C, `compat` runs a
+  build against a private proxy and reports its verdict in text and in JSON, a
+  proxy that ignores SIGTERM is reported rather than waited on forever,
+  `install --autostart` on a machine with no systemd writes the unit and says
+  what still works (and `uninstall` takes it away again without reading the
+  missing systemctl as a failure), and `uninstall --keep-wrapper` leaves the
+  launcher alone as asked. `cli.js` goes from 90.8 to 97.1 of lines and 85.4 to
+  95.5 of functions; the suite's own floors move with it, 95.7 line and 83
+  branch and 95 function.
 - A receipts body that never arrives is refused instead of parked. The drain on
   the blocked paths has had a two-second deadline since it was written; the
   receipts path had none, so a client that sent headers, an announced length and
