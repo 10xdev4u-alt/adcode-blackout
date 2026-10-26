@@ -230,6 +230,229 @@ test("uninstall reports a foreign process on the port instead of killing it", as
   }
 });
 
+test("a launch whose proxy cannot start still starts the editor", async () => {
+  const port = 18860;
+  const { home, app } = await setup(port);
+  // Something answers on the port that is not the proxy, so the proxy cannot
+  // bind and no amount of waiting produces a health answer. Invariant three:
+  // an ad failure costs an ad, never an editor.
+  const foreign = createServer((_req, res) => {
+    res.writeHead(404, { "content-type": "text/plain" });
+    res.end("not the proxy");
+  });
+  await listen(foreign, port);
+  const started = join(home, "editor-started");
+  // Padded past the AppImage size floor, or the launcher would refuse to treat
+  // it as a build at all and the test would be measuring the wrong refusal.
+  writeFileSync(app, `#!/bin/sh\ntouch "${started}"\n${"#".repeat(1_200_000)}`);
+  chmodSync(app, 0o755);
+  try {
+    const launched = await runAsync(home, ["launch"]);
+    assert.equal(launched.status, 0, launched.stdout + launched.stderr);
+    assert.equal(existsSync(started), true, "the editor started anyway");
+    assert.match(launched.stderr, /unprotected|did not start/);
+    assert.match(launched.stderr, /doctor/);
+  } finally {
+    await close(foreign);
+  }
+});
+
+test("a proxy that ignores SIGTERM is reported, not waited on forever", async () => {
+  const port = 18861;
+  const { home } = await setup(port);
+  /*
+   * The one case the kill path cannot decide on its own: the process is the
+   * proxy by command line, holds the port, answers health, and refuses to die.
+   * Uninstall must say so and finish; hanging on it would mean a user cannot
+   * remove the thing that is in their way.
+   */
+  const script = [
+    `require("node:http").createServer((q, s) => {`,
+    `  if (q.url === "/_blackout/health") { s.writeHead(200, { "content-type": "application/json" });`,
+    `    s.end(JSON.stringify({ ok: true, version: "0.0.0", enabled: true, upstream: "http://127.0.0.1:9", uptimeMs: 1 })); return; }`,
+    `  s.writeHead(404); s.end();`,
+    `}).listen(${port}, "127.0.0.1");`,
+    `process.on("SIGTERM", () => {});`,
+    `setInterval(() => {}, 1000);`,
+  ].join("\n");
+  // `serve` and a path ending in blackout.js are what `isBlackoutPid` looks for.
+  const stubborn = spawn(process.execPath, ["-e", script, "serve", join(home, "blackout.js")], { stdio: "ignore" });
+  mkdirSync(stateDir(home), { recursive: true });
+  writeFileSync(pidFile(home), `${stubborn.pid}\n`);
+  try {
+    assert.equal(await waitFor(health(port)), true, "the stubborn process answers health");
+    const uninstalled = await runAsync(home, ["uninstall"]);
+    assert.equal(uninstalled.status, 0, uninstalled.stdout + uninstalled.stderr);
+    assert.match(uninstalled.stdout, new RegExp(`pid ${stubborn.pid} did not stop`));
+    assert.match(uninstalled.stdout, /check pid/);
+  } finally {
+    stubborn.kill("SIGKILL");
+    await new Promise((resolve) => stubborn.once("exit", resolve));
+    rmSync(pidFile(home), { force: true });
+  }
+});
+
+test("install --autostart without systemd leaves the unit and says what still works", async () => {
+  const { home } = await setup(18862);
+  // A PATH with nothing in it is the state a container or a headless box is in:
+  // systemctl exists nowhere, `daemon-reload` fails, and the install must still
+  // be an install - the unit is written and the launcher starts the proxy.
+  const emptyBin = join(home, "empty-bin");
+  mkdirSync(emptyBin, { recursive: true });
+  const installed = run(home, ["install", "--autostart"], { PATH: emptyBin });
+  assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+  assert.match(installed.stdout, /^unit {7}/m);
+  assert.match(installed.stdout, /systemd {4}could not enable the unit here; the launcher still starts the proxy on demand/);
+  assert.equal(existsSync(join(home, ".config", "systemd", "user", "adcode-blackout.service")), true);
+
+  // Uninstall with the same empty PATH must take it away again rather than leave
+  // the unit behind, and must not read the missing systemctl as a failure.
+  const uninstalled = run(home, ["uninstall"], { PATH: emptyBin });
+  assert.equal(uninstalled.status, 0, uninstalled.stdout + uninstalled.stderr);
+  assert.match(uninstalled.stdout, /^unit {7}removed$/m);
+  assert.equal(existsSync(join(home, ".config", "systemd", "user", "adcode-blackout.service")), false);
+});
+
+test("uninstall --keep-wrapper leaves the launcher alone", async () => {
+  const { home } = await setup(18863);
+  const wrapper = join(home, ".local", "bin", "adcode");
+  assert.equal(run(home, ["install"]).status, 0);
+  assert.equal(existsSync(wrapper), true);
+
+  // The other half of the launcher decision: a user who wants to keep their own
+  // entry point after uninstalling gets to keep it, and is told they have.
+  const kept = run(home, ["uninstall", "--keep-wrapper"]);
+  assert.equal(kept.status, 0, kept.stdout + kept.stderr);
+  assert.match(kept.stdout, /^launcher {3}kept$/m);
+  assert.equal(existsSync(wrapper), true);
+});
+
+test("events prints the latest decision once, and follows until it is stopped", async () => {
+  const port = 18864;
+  const { home } = await setup(port);
+  const started = run(home, ["serve", "--detach"]);
+  assert.equal(started.status, 0, started.stderr);
+  try {
+    assert.equal(await waitFor(health(port)), true, "the proxy answers");
+    const serve = () => fetch(`http://127.0.0.1:${port}/v1/serve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "events" }),
+    });
+    await serve();
+    await serve();
+
+    // `--once` is "the latest, or the next one", not the first of the replay.
+    const once = run(home, ["events", "--once"]);
+    assert.equal(once.status, 0, once.stdout + once.stderr);
+    assert.match(once.stdout, /serve-blocked {4}\/v1\/serve rule=serve-v1/);
+    const lines = once.stdout.trim().split("\n");
+    assert.equal(lines.length, 1, `one decision, not a replay: ${once.stdout}`);
+
+    // The follower holds the stream open until it is told to stop, and stopping
+    // it is an ordinary exit - a person pressing Ctrl-C is not a failure.
+    const following = spawn(process.execPath, [CLI, "events"], {
+      env: { ...process.env, HOME: home, BLACKOUT_HOME: join(home, ".config", "blackout"), BLACKOUT_STATE: stateDir(home) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    following.stdout.on("data", (chunk) => { stdout += chunk; });
+    const exit = new Promise((resolve) => following.once("exit", (code) => resolve(code)));
+    const appeared = await waitFor(() => stdout.includes("serve-blocked"), { timeoutMs: 5_000, stepMs: 25 });
+    assert.equal(appeared, true, `the follower printed nothing: ${JSON.stringify(stdout)}`);
+    following.kill("SIGINT");
+    assert.equal(await exit, 0);
+  } finally {
+    stopProxy(home);
+  }
+});
+
+test("the event follower survives the proxy going away, and stops when asked", async () => {
+  const port = 18866;
+  const { home } = await setup(port);
+  assert.equal(run(home, ["serve", "--detach"]).status, 0);
+  try {
+    assert.equal(await waitFor(health(port)), true, "the proxy answers");
+    const serve = () => fetch(`http://127.0.0.1:${port}/v1/serve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "follower" }),
+    });
+    await serve();
+
+    const following = spawn(process.execPath, [CLI, "events"], {
+      env: { ...process.env, HOME: home, BLACKOUT_HOME: join(home, ".config", "blackout"), BLACKOUT_STATE: stateDir(home) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    following.stdout.on("data", (chunk) => { stdout += chunk; });
+    following.stderr.on("data", (chunk) => { stderr += chunk; });
+    const exit = new Promise((resolve) => following.once("exit", (code) => resolve(code)));
+    assert.equal(await waitFor(() => stdout.includes("serve-blocked"), { timeoutMs: 5_000, stepMs: 25 }), true, stdout);
+
+    // A restart is ordinary on a desktop - an update, a crash, systemctl. The
+    // follower used to end here with "terminated" and exit 1.
+    stopProxy(home);
+    assert.equal(await waitFor(() => /reconnecting|lost/.test(stderr), { timeoutMs: 5_000, stepMs: 25 }), true, stderr);
+    assert.equal(run(home, ["serve", "--detach"]).status, 0);
+    assert.equal(await waitFor(health(port)), true, "the proxy answers again");
+    await serve();
+    assert.equal(
+      await waitFor(() => (stdout.match(/serve-blocked/g) ?? []).length >= 2, { timeoutMs: 12_000, stepMs: 50 }),
+      true,
+      `the follower did not reconnect: ${stdout} ${stderr}`,
+    );
+
+    // Ctrl-C on a follower is an exit, not a failure.
+    following.kill("SIGINT");
+    assert.equal(await exit, 0);
+  } finally {
+    stopProxy(home);
+  }
+});
+
+test("compat runs a build against a private proxy and reports the verdict", async () => {
+  const port = 18865;
+  const { home, app } = await setup(port);
+  // The stand-in ad server: a real one has to answer /v1/config, or the private
+  // proxy degrades to the safe config and the run is judged on that instead.
+  const upstream = createServer((req, res) => {
+    if (req.url === "/v1/config") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ killSwitch: false, caps: { dailyCap: 40, minIntervalMs: 1_000 }, projections: { off: "0", light: "10", standard: "20", max: "30" } }));
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  await listen(upstream, 0);
+  writeFileSync(join(home, ".config", "blackout", "config.json"), `${JSON.stringify({ port, upstream: `http://127.0.0.1:${upstream.address().port}` }, null, 2)}\n`);
+  writeFileSync(app, `#!/bin/sh\ncurl -s -X POST -d "{}" "$ADCODE_AD_SERVER/v1/serve" > /dev/null\ncurl -s "$ADCODE_AD_SERVER/v1/config" > /dev/null\nexec sleep 30\n${"#".repeat(1_200_000)}`);
+  chmodSync(app, 0o755);
+  try {
+    // `runAsync`, not `run`: the stand-in upstream lives in this process, and
+    // `spawnSync` would freeze the loop it answers from - the compat window
+    // would then measure a captive upstream rather than the proxy.
+    const passed = await runAsync(home, ["compat", "--app", app, "--seconds", "2"]);
+    assert.equal(passed.status, 0, passed.stdout + passed.stderr);
+    assert.match(passed.stdout, /^compat pass/m);
+    assert.match(passed.stdout, /ok {3}serve {4}1 blocked/);
+    assert.match(passed.stdout, /ok {3}config {3}1 rewritten/);
+    assert.match(passed.stderr, /private proxy for 2s/);
+
+    const machine = await runAsync(home, ["compat", "--app", app, "--seconds", "2", "--json"]);
+    assert.equal(machine.status, 0, machine.stdout + machine.stderr);
+    const verdict = JSON.parse(machine.stdout);
+    assert.equal(verdict.verdict, "pass");
+    assert.equal(verdict.appImage, app);
+    assert.equal(verdict.observed.serves, 1);
+    assert.equal(verdict.observed.configs, 1);
+  } finally {
+    await close(upstream);
+  }
+});
+
 test("verify calls an absent journal empty, an intact one ok, and a tampered one broken", async () => {
   const { home } = await setup(18844);
   const absent = run(home, ["verify"]);
