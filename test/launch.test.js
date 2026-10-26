@@ -1,11 +1,11 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ensureProxy, launchApp, probe, proxyUrl } from "../src/launch.js";
+import { ensureProxy, launchApp, probe, proxyUrl, removePid, writePid } from "../src/launch.js";
 import { parsePolicy } from "../src/policy.js";
 import { createProxy } from "../src/proxy.js";
 import { createJournal } from "../src/journal.js";
@@ -38,6 +38,48 @@ test("launchApp reports a missing executable instead of throwing", async () => {
   const result = await launchApp({ appImage: "/nonexistent/ADCode.AppImage", url: "http://127.0.0.1:1" });
   assert.equal(result.code, 127);
   assert.ok(result.error instanceof Error);
+});
+
+test("a terminal signal reaches the editor, and stops reaching it once it exits", async () => {
+  const signals = [];
+  const child = new EventEmitter();
+  child.killed = false;
+  child.kill = (signal) => {
+    signals.push(signal);
+    return true;
+  };
+
+  const launched = launchApp({ appImage: "/not-a-real-app", url: "http://127.0.0.1:1", spawnImpl: () => child });
+  // Not an OS signal: this is the handler `launchApp` installs, so a Ctrl-C on
+  // the launcher reaches the editor instead of killing only the launcher.
+  process.emit("SIGINT");
+  process.emit("SIGTERM");
+  assert.deepEqual(signals, ["SIGINT", "SIGTERM"]);
+
+  child.emit("exit", 0, null);
+  assert.deepEqual(await launched, { code: 0, signal: null });
+  // The handlers are gone with the child: a later signal must not be forwarded
+  // to a process that has already been reaped.
+  process.emit("SIGINT");
+  assert.deepEqual(signals, ["SIGINT", "SIGTERM"]);
+});
+
+test("a pid file is written, and removing one that is already gone is not an error", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "blackout-pid-"));
+  dirs.push(dir);
+  const previous = process.env["BLACKOUT_STATE"];
+  process.env["BLACKOUT_STATE"] = dir;
+  try {
+    const path = writePid(4242);
+    assert.equal(readFileSync(path, "utf8"), "4242\n");
+    removePid();
+    assert.equal(existsSync(path), false);
+    // The second call is the ordinary case after a crash: nothing to remove.
+    removePid();
+  } finally {
+    if (previous === undefined) delete process.env["BLACKOUT_STATE"];
+    else process.env["BLACKOUT_STATE"] = previous;
+  }
 });
 
 test("an IPv6 host becomes a URL the app can use", () => {

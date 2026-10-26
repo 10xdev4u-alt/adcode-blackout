@@ -31,3 +31,15 @@ jobs:
       # still works but no longer returns the exit code the README promises.
       - name: surface
         run: node scripts/surface.js
+
+  # The floors are where the suite is, not where it should be: they exist so a
+  # new branch arrives with a test or with a deliberate, argued lowering. Pinned
+  # to one runtime because the threshold flags need Node 22 and up.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm run coverage

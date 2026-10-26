@@ -25,8 +25,17 @@ and you have the whole development loop.
   temporary HOME.
 - Desktop resolution is tested with real files and mtimes in
   `test/desktop.test.js`; do not mock the filesystem there.
+- A test that needs a server *and* a CLI child must spawn the CLI
+  asynchronously. `spawnSync` blocks the test process for the child's whole
+  lifetime, so a listener hosted in that process cannot answer: the child sees a
+  timeout and the test passes for the wrong reason. `test/cli-edges.test.js`
+  has the impostor case.
 
 Run `node scripts/smoke.js` before touching a real install.
+
+`npm run coverage` holds line, branch and function floors. They are where the
+suite is, not where it should be: a new branch arrives with a test, or the
+lowering is argued in the pull request.
 
 Before a release, walk the whole CLI surface:
 

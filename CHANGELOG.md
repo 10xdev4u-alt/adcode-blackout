@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The suite now covers the refusals, which were the paths with no test: a
+  foreground start in a state directory another proxy owns, a port held by
+  something that is not the proxy (and the claim it must release on the way
+  out), `uninstall` against a process that answers the health route but is not
+  this proxy - the stale pid is named and nothing is signalled - `verify` on an
+  absent, intact and tampered journal, `status` when nothing is running,
+  `doctor` on a launcher it did not write and a config it cannot read, a port
+  moved under a running proxy, a terminal signal reaching the editor and
+  stopping when it exits, and a broken custom pack stopping a detached start
+  before it spawns anything. `launch.js` and `report.js` are at 100% of lines.
+  `npm run coverage` holds the floors (95 line, 79 branch, 94 function) in CI,
+  so the next branch arrives with a test or with a lowering someone argued for.
 - The soak stopped failing itself. It divided the achieved rate by wall time
   that included its own five-second settle sleep, so a 20-second run at 60/s
   reported `44/s` and `soak: FAILED` while the load window had actually
