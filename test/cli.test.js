@@ -513,6 +513,43 @@ test("an unknown command is a usage error, not a stack trace", async () => {
   assert.match(result.stderr, /unknown command/);
 });
 
+test("a second proxy cannot share the state directory", async () => {
+  const port = 18818;
+  const { home } = await setup(port);
+  const started = run(home, ["serve", "--detach"]);
+  assert.equal(started.status, 0, started.stderr);
+  try {
+    assert.equal(await waitFor(async () => {
+      try {
+        return (await fetch(`http://127.0.0.1:${port}/_blackout/health`)).ok;
+      } catch {
+        return false;
+      }
+    }), true);
+
+    // Both processes used to append to one journal, each with its own chain, and
+    // `verify` reported a break at the first interleaved entry - caused by the
+    // tool, not by tampering. The second start is now refused.
+    const second = run(home, ["serve", "--detach", "--port", String(port + 1)]);
+    assert.equal(second.status, 1, second.stdout + second.stderr);
+    assert.match(second.stderr, /another proxy is writing/);
+    assert.match(second.stderr, new RegExp(String(port)));
+
+    for (let index = 0; index < 5; index += 1) {
+      await fetch(`http://127.0.0.1:${port}/v1/serve`, { method: "POST", body: "{}" });
+    }
+    const verify = run(home, ["verify"]);
+    assert.equal(verify.status, 0, verify.stdout + verify.stderr);
+
+    // Starting the proxy that is already answering stays a no-op, not an error.
+    const again = run(home, ["serve", "--detach"]);
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(again.stdout, /already running/);
+  } finally {
+    stopProxy(home);
+  }
+});
+
 test("SIGHUP reloads a user rule pack and keeps the old one on a bad edit", async () => {
   const { home } = await setup(18814);
   const started = run(home, ["serve", "--detach"]);

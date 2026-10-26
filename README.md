@@ -176,12 +176,20 @@ cannot hit it with a form post.
 - Port 8790 busy: `launch` warns and starts ADCode unprotected rather than
   refusing to start it. `doctor` names the pid and command that hold the port
   on Linux, and says "not running" where it cannot know.
+- Two proxies, one state directory: the second refuses to start and names the
+  pid and port that already write the journal, because two chains in one file
+  read as tampering. Start it with a different `BLACKOUT_STATE`, or stop the
+  first. Starting `serve` for the port that is already answering is a no-op.
 - AppImage renamed by an update: the next launch resolves the newest match.
   Set `ADCODE_APPIMAGE` to pin one deliberately.
 
-`uninstall` also stops a proxy that blackout started, identified by both the
-pid file and the process command line. A proxy started by hand is reported, not
-killed.
+`uninstall` also stops a proxy that blackout started. Ownership comes from the
+process holding the configured port, checked to be this proxy, not from the pid
+file: a stale pid that now belongs to something else is ignored and named in
+the output. A port held by a process that is not blackout is reported, never
+killed. Where the port cannot be attributed - `listenerPid` reads `/proc` and
+is Linux-only - the pid file is all there is, so the process it names is stopped
+only if its command line is this proxy.
 
 Uninstalling keeps the journal and the config, because they are the record of
 what happened. `blackout uninstall --purge` removes them too; it refuses to
@@ -192,7 +200,8 @@ follow a symlink and deletes only files it recognises.
 No dependencies, no build step.
 
 ```sh
-npm test                 # 101 tests, node:test
+npm test                 # the whole suite, node:test
+npm run surface          # every command, in every state it can meet
 node bin/blackout.js help
 node scripts/smoke.js    # proxy + contract calls + a report, no app needed
 ```

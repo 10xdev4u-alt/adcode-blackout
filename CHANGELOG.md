@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- The soak stopped failing itself. It divided the achieved rate by wall time
+  that included its own five-second settle sleep, so a 20-second run at 60/s
+  reported `44/s` and `soak: FAILED` while the load window had actually
+  delivered 58.8/s - the proxy answers 708/s with four in flight. The rate is
+  now measured over the load window and the settle is reported separately, the
+  pacing loop sleeps until the next tick is due instead of dropping its own
+  overshoot, and a test runs the script and pins both numbers so a gate that
+  cries wolf cannot come back quietly.
+- `npm run surface` walks every command in every state it meets. Nothing
+  running, running, paused - each against a throwaway HOME on its own port - and
+  fails on an exit code that contradicts the README, JSON that does not parse, a
+  config write that was silently refused, or a stack trace where a sentence
+  belongs. The unit tests check commands one at a time; this checks that  the tool still behaves like a tool when someone uses it. 65 checks, including
+  `compat`'s pass and failure paths and the artifacts a failure retains.
+- Two proxies can no longer share one state directory. `serve --port A` and
+  `serve --port B` both appended to the same `journal.jsonl` with independent
+  chains, so each decision was valid and the file still read as tampering:
+  reproduced with two proxies and ten decisions each, `verify` reported `BROKEN
+  at entry 1`. The directory is now claimed by the process that writes it, the
+  claim names its pid and port, and a second start is refused before the journal
+  is opened. A claim left by a crash is taken over, and starting `serve` for the
+  port already answering stays a no-op.
+- The suite now covers the protocol paths nothing else reached: oversized
+  headers, `CONNECT`, `Upgrade`, HTTP/1.0 without a `Host`, pipelining, two
+  framings on one request (smuggling), hostile request targets, an 8 MiB
+  response to a deliberately slow reader, a failed TLS handshake, and a clock
+  that moves backwards. Each asserts the proxy is still answering afterwards. A
+  crash between the rotation rename and the new live file - a real two-syscall
+  window - is covered in the journal tests, because the next start has to
+  resume the chain rather than begin again at genesis. All of it passed on the
+  first run; the value is that it now stays that way.
+- `blackout compat` no longer points at a journal it did not write. A build that
+  never called the proxy journals nothing, and the journal is opened lazily on
+  its first decision, so a failing run printed `journal kept /tmp/...` for a
+  path that did not exist - the one artifact the verdict says to read next. The
+  retained directory now always contains the file the message names.
 - Memory no longer grows with the journal. Only the most recent 5,000 decisions
   are retained; totals are counted as entries arrive, so `report`, `status` and
   the dashboard still show the whole record. Measured before the change: a soak

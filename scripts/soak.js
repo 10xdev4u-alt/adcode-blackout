@@ -125,12 +125,20 @@ while (Date.now() - startedAt < seconds * 1_000) {
     inflight++;
     void work(tick++).finally(() => { inflight--; });
   }
-  await sleep(Math.min(interval, 25));
+  // Sleep only until the next tick is due, never a whole interval: a fixed
+  // interval sleep loses its own overshoot on every iteration, so a run that
+  // falls behind can never catch up.
+  await sleep(Math.min(25, Math.max(1, startedAt + (tick + 1) * interval - Date.now())));
   if (samples.length < Math.floor((Date.now() - startedAt) / 1_000)) {
     const usage = process.memoryUsage();
     samples.push({ rss: usage.rss, heapUsed: usage.heapUsed, heapTotal: usage.heapTotal, external: usage.external, arrayBuffers: usage.arrayBuffers, fds: descriptors() });
   }
 }
+
+// The load window ends here. Everything after this is measurement, and counting
+// it as load time made a 60/s run report 44/s: the rate was divided by the
+// settle sleep as well as by the run.
+const loadedAt = Date.now();
 
 // Let the last requests finish, then give the client pool a moment to close its
 // idle sockets: descriptors measured while keep-alive is still holding them are
@@ -139,7 +147,8 @@ const drainBy = Date.now() + 10_000;
 while (inflight > 0 && Date.now() < drainBy) await sleep(20);
 await sleep(5_000);
 
-const missed = Math.floor((Date.now() - startedAt) / interval) - tick;
+const loadSeconds = (loadedAt - startedAt) / 1_000;
+const missed = Math.floor((loadedAt - startedAt) / interval) - tick;
 const settled = process.memoryUsage();
 const settledDetail = { heapTotal: settled.heapTotal, external: settled.external, arrayBuffers: settled.arrayBuffers };
 const after = { rss: settled.rss, heapUsed: settled.heapUsed, fds: descriptors() };
@@ -179,10 +188,11 @@ if (secondHalfHeapGrowth > MAX_SECOND_HALF_HEAP_BYTES) problems.push(`heap kept 
 if (totals.total !== totals.retained && journal.entries.length > 6_000) problems.push(`journal retained ${journal.entries.length} entries`);
 if (totals.total !== onDisk.length) problems.push(`journal counted ${totals.total} but wrote ${onDisk.length}`);
 if (fdGrowth > MAX_FD_GROWTH) problems.push(`descriptors grew by ${fdGrowth}`);
-const achievedRate = tick / ((Date.now() - startedAt) / 1_000);
+const achievedRate = tick / loadSeconds;
 if (achievedRate < rate * 0.8) problems.push(`only ${achievedRate.toFixed(1)} of ${rate}/s achieved`);
 
 const summary = {
+  loadSeconds: Number(loadSeconds.toFixed(1)),
   seconds: elapsed,
   requests: sent,
   decisions: { blocked, acked, rewritten, entries: totals.total, retained: journal.entries.length, onDisk: onDisk.length, segments: journal.segments.length },
@@ -190,7 +200,7 @@ const summary = {
   detailMiB: { heapTotal: Math.round(settledDetail.heapTotal / 1048576), external: Math.round(settledDetail.external / 1048576), arrayBuffers: Math.round(settledDetail.arrayBuffers / 1048576) },
   heapMiB: { start: Number((before.heapUsed / 1024 / 1024).toFixed(1)), end: Number((after.heapUsed / 1024 / 1024).toFixed(1)), secondHalf: Number((secondHalfHeapGrowth / 1024 / 1024).toFixed(1)) },
   missed,
-  achievedRate: Number((tick / ((Date.now() - startedAt) / 1_000)).toFixed(1)),
+  achievedRate: Number(achievedRate.toFixed(1)),
   samples: samples.map((sample) => ({ rss: Math.round(sample.rss / 1048576), heap: Math.round(sample.heapUsed / 1048576), total: Math.round(sample.heapTotal / 1048576), ext: Math.round(sample.external / 1048576), bufs: Math.round(sample.arrayBuffers / 1048576), fds: sample.fds })),
   fds: { start: before.fds, peak: peakFds, growth: fdGrowth },
   ok: problems.length === 0,
@@ -200,7 +210,7 @@ const summary = {
 if (json) {
   console.log(JSON.stringify(summary, null, 2));
 } else {
-  console.log(`soak ${summary.seconds.toFixed(1)}s at ${rate}/s`);
+  console.log(`soak ${summary.loadSeconds.toFixed(1)}s of load at ${rate}/s (${summary.seconds.toFixed(1)}s including settle)`);
   console.log(`requests   ${sent.serve} serve, ${sent.receipts} receipts, ${sent.config} config, ${sent.chat} chat`);
   console.log(`decisions  ${blocked} blocked, ${acked} acked, ${rewritten} rewritten (${totals.total} total, ${journal.entries.length} retained, ${onDisk.length} on disk, ${journal.segments.length} segment(s))`);
   // RSS is reported, not judged: V8 reserves heap and does not hand it back, so

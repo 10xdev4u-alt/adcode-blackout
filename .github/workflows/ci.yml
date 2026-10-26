@@ -26,3 +26,8 @@ jobs:
         run: node bin/blackout.js help > /dev/null
       - name: smoke
         run: node scripts/smoke.js
+      # The unit tests check commands one at a time; this walks the whole surface
+      # in three states. It is the only job that would notice a command that
+      # still works but no longer returns the exit code the README promises.
+      - name: surface
+        run: node scripts/surface.js

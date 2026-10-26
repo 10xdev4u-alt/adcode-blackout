@@ -340,6 +340,30 @@ test("a subscriber that stops reading is cut off, not buffered forever", async (
   socket.destroy();
 });
 
+test("many dashboard tabs that go away leave nothing subscribed", async () => {
+  // A dashboard left open in several windows is normal; those windows closing is
+  // normal too. The subscriber set is the thing that would grow if a closed tab
+  // only ended its socket and not its closure.
+  const tabs = [];
+  for (let index = 0; index < 25; index += 1) {
+    const ac = new AbortController();
+    const res = await fetch(`${proxy.url}/_blackout/events?tail=0`, { signal: ac.signal });
+    const reader = res.body.getReader();
+    await reader.read();
+    tabs.push(ac);
+  }
+  assert.equal(journal.subscribers, 25);
+
+  for (const ac of tabs) ac.abort();
+  for (let attempt = 0; attempt < 100 && journal.subscribers > 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(journal.subscribers, 0, "every closed tab unsubscribed");
+
+  // And the proxy is still the proxy afterwards.
+  assert.equal((await fetch(`${proxy.url}/_blackout/health`)).status, 200);
+});
+
 test("a subscriber that keeps reading is not cut off", async () => {
   const ac = new AbortController();
   const res = await fetch(`${proxy.url}/_blackout/events`, { signal: ac.signal });

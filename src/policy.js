@@ -50,6 +50,7 @@ export function hostPort(host, port) {
 export const policyPath = () => join(configHome(), "config.json");
 export const journalPath = () => join(stateHome(), "journal.jsonl");
 export const pidPath = () => join(stateHome(), "blackout.pid");
+export const lockPath = () => join(stateHome(), "blackout.lock");
 export const logPath = () => join(stateHome(), "blackout.log");
 
 export function ensureHome() {
