@@ -14,7 +14,7 @@
   be removed reporting `false` instead of pretending, a journal that cannot be
   written keeping the entry and its count and surfacing the failure, a state
   directory that was never created reading as an empty journal, and a unit that
-  was never installed not being enabled. The floors move up with it: 96 line,
+  was never installed not being enabled. The floors move up with it: 95.7 line,
   83 branch, 95 function.
 - The soak runs in CI on every pull request, at a rate a shared runner holds.
   It was the one gate that only ran when somebody remembered, and it is the only

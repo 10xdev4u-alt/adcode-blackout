@@ -33,8 +33,11 @@ jobs:
         run: node scripts/surface.js
 
   # The floors are where the suite is, not where it should be: they exist so a
-  # new branch arrives with a test or with a deliberate, argued lowering. Pinned
-  # to one runtime because the threshold flags need Node 22 and up.
+  # new branch arrives with a test or with a deliberate, argued lowering. They sit
+  # a few tenths below what the suite measures, because the CLI tests spawn
+  # processes and a child's coverage profile can land after the run that spawned
+  # it - a floor set on the last measurement fails on the next run, not on a
+  # change. Pinned to one runtime because the threshold flags need Node 22 and up.
   coverage:
     runs-on: ubuntu-latest
     steps:
