@@ -84,7 +84,10 @@ languages and file *basenames*, and blackout discards even that.
 Each entry is `{seq, at, kind, data, prev, hash}` where `hash` is SHA-256 over
 `[seq, at, kind, data, prev]`. `verify` recomputes the chain from genesis
 (`"0".repeat(64)`). A truncated final line is tolerated; a broken link anywhere
-else is reported at its index. Subscribers receive entries as they are appended,
+else is reported at its index, as is a line deleted or reordered anywhere but
+the end - every shorter chain is a valid chain, so an end that was trimmed is
+only visible against a head kept somewhere else (`blackout verify` prints the
+one it saw, count and all, for exactly that). Subscribers receive entries as they are appended,
 which is what the dashboard's event stream consumes.
 
 The live file rotates at 5 MiB to `journal.0001.jsonl`, then `0002`, and so on.

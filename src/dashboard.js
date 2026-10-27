@@ -82,7 +82,7 @@ export function renderDashboard(report) {
     <h2>Journal</h2>
     <p class="warn" id="journal-write"${report.journalWriteError == null ? " hidden" : ""}>${report.journalWriteError == null ? "" : escape(`Journal file not writable since ${new Date(report.journalWriteError.at).toISOString()}: ${report.journalWriteError.message}. Decisions are in memory only.`)}</p>
     <p class="muted" id="chain">${escape(chain)}</p>
-    <p class="muted">Every decision is appended with the previous hash. If a line is edited, deleted or reordered, the chain check names the first bad index.</p>
+    <p class="muted">Every decision is appended with the previous hash, so an edited, reordered or deleted line is named by the check. A line deleted from the <em>end</em> is the one case it cannot see - nothing in a file can witness its own end. Keep the <code>entries, head</code> line <code>blackout verify</code> prints: a journal that has since been shortened no longer agrees with it.</p>
   </section>
 
   <footer>

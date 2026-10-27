@@ -86,6 +86,28 @@ test("deleting a line breaks the chain at the gap", () => {
   assert.deepEqual(verifyChain([journal.entries[0], journal.entries[2]]), { ok: false, brokenAt: 1 });
 });
 
+test("a line deleted from the end leaves a chain that still verifies", () => {
+  /*
+   * The same deletion one line later is invisible to the walk: every link that
+   * remains is intact and the sequence still counts from zero, so there is
+   * nothing left for the check to disagree with. A file cannot witness its own
+   * end - only a head kept somewhere else can, which is why `blackout verify`
+   * prints the one it saw. The dashboard promised otherwise until it was fixed
+   * to say this; the assertion below is the limit, not a wish.
+   */
+  const journal = createJournal();
+  journal.append("a", { n: 1 });
+  journal.append("b", { n: 2 });
+  journal.append("c", { n: 3 });
+
+  assert.deepEqual(
+    verifyChain([journal.entries[0], journal.entries[1]]),
+    { ok: true, brokenAt: null },
+    "the last decision deleted, and the record still walks clean",
+  );
+  assert.notEqual(journal.entries[1].hash, journal.head(), "the head a witness would have kept is not this one");
+});
+
 test("a truncated final line is dropped, not fatal", () => {
   const path = tempJournal();
   const journal = createJournal(path);

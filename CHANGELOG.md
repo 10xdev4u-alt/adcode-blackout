@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The dashboard promised the chain catches a deleted line without qualification.
+  It catches every deleted line but the last: a chain that has been trimmed at
+  the end still walks clean, because every link that remains is intact and the
+  sequence still counts from zero - a file cannot witness its own end, which
+  `docs/ARCHITECTURE.md` already said and the page did not. The page now says
+  what the check can see, names the case it cannot, and points at the remedy:
+  the `entries, head` line `blackout verify` prints is the witness, and a
+  journal that has since been shortened no longer agrees with it. A test pins
+  the limit itself so nobody mistakes it for a bug in `verifyChain` and "fixes"
+  it into a promise the file cannot keep.
 - Six of the CLI's paths that no test ran are covered, each with the scenario a
   person actually hits: a launch whose proxy cannot start still starts the
   editor (with the reason and the log named), `events --once` picks the latest
