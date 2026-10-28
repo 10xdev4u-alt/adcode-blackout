@@ -15,6 +15,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createJournal } from "../src/journal.js";
 
 const CLI = fileURLToPath(new URL("../bin/blackout.js", import.meta.url));
 const PORT = 18793;
@@ -120,6 +121,32 @@ async function waitFor(check, timeoutMs = 5_000) {
   }
   return false;
 }
+
+test("the witness line is what catches a journal trimmed at the end", async () => {
+  const home = await mkdtemp(join(tmpdir(), "blackout-cli-"));
+  homes.push(home);
+  const state = join(home, ".local", "state", "blackout");
+  mkdirSync(state, { recursive: true });
+  const file = join(state, "journal.jsonl");
+  const journal = createJournal(file);
+  journal.append("serve-blocked", { path: "/v1/serve" });
+  journal.append("receipt-blocked", { path: "/v1/receipts" });
+  journal.append("resumed", {});
+
+  const before = run(home, ["verify"]);
+  assert.equal(before.status, 0, before.stdout + before.stderr);
+  assert.match(before.stdout, /ok: 3 entries, head [0-9a-f]{64}/);
+
+  // The last decision is taken off the end. Every link that remains is intact,
+  // so the walk still passes - which is why the printed line is the witness.
+  const lines = readFileSync(file, "utf8").trimEnd().split("\n");
+  writeFileSync(file, `${lines.slice(0, -1).join("\n")}\n`);
+
+  const after = run(home, ["verify"]);
+  assert.equal(after.status, 0, "the chain alone cannot see this");
+  assert.match(after.stdout, /ok: 2 entries/);
+  assert.notEqual(after.stdout.trim(), before.stdout.trim(), "the line someone kept no longer agrees with the journal");
+});
 
 test("install, launch, pause, report, verify, uninstall", async () => {
   const { home, app, out } = await setup();

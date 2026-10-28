@@ -39,6 +39,16 @@ test("the page makes no external request", () => {
   assert.match(html, /fetch\("\/_blackout\/report"/);
 });
 
+test("the page says what the chain cannot see, and what to keep", () => {
+  const html = renderDashboard(report);
+  // The old sentence promised that a deleted line was always named. A deletion
+  // at the end of the journal leaves a chain that still verifies, so the page
+  // says which case it means and what a person can keep instead.
+  assert.doesNotMatch(html, /If a line is edited, deleted or reordered/);
+  assert.match(html, /deleted from the <em>end<\/em> is the one case it cannot see/);
+  assert.match(html, /blackout verify/);
+});
+
 test("a broken chain is shown as broken, not hidden", () => {
   const broken = { ...report, integrity: { ok: false, brokenAt: 4 } };
   assert.match(renderDashboard(broken), /chain broken at 4/);
